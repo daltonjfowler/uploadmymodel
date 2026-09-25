@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "uploadmymodel",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-08-31",
+  // uploadmymodel.com is the real address; www redirects to it (src/worker.js). The
+  // workers.dev URL stays on as a fallback.
+  "routes": [
+    { "pattern": "uploadmymodel.com", "custom_domain": true },
+    { "pattern": "www.uploadmymodel.com", "custom_domain": true }
+  ],
+  "workers_dev": true,
+  "assets": {
+    "directory": "./public/",
+    "binding": "ASSETS",
+    // Every response, static files included, goes through the Worker for https + security headers.
+    "run_worker_first": true,
+    "not_found_handling": "404-page"
+  },
+  "observability": { "enabled": true, "head_sampling_rate": 1 }
+}
