@@ -48,8 +48,9 @@ profile and a school-sliced 3DBenchy are in the repo (`profiles/`, `test/golden/
 The full list, with where each fact came from, is in [docs/HARDWARE.md](docs/HARDWARE.md). Short
 version, from a real school G-code file (2026-09-25):
 
-- **TAZ Workhorse, SE tool head, 0.50 mm nozzle, 2.85 mm Polymaker PolyLite PLA**, Marlin firmware,
-  280 × 280 × 285 mm build volume.
+- **Four TAZ Workhorses, SE tool head, 0.50 mm nozzle, 2.85 mm Polymaker PolyLite PLA**,
+  280 × 280 × 285 mm build volume. Three run Marlin 2.0.9.0.13; one runs a newer version (unknown).
+  One G-code file should run on all four.
 - Class profile `current_lulzbot_9_18` = **High Detail** (0.18 mm layers) + tree supports touching
   the plate + 20% infill. 205 °C / 65 °C first layer, then 210 °C / 60 °C.
 - **School slices with Cura LE engine 4.13.2. Dalton's home PC has 4.13.17, and its start G-code is
