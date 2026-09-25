@@ -2,3 +2,4 @@
 *.png binary
 *.stl binary
 *.3mf binary
+*.gcode -text

@@ -16,7 +16,9 @@ and no student accounts.
 | sent over Web Serial | sent over Web Serial | **downloaded**, copied to SD card by hand |
 | Uno board fixed on the server | power/speed presets on the server | print profiles frozen on the server |
 
-**Status:** holding page live at https://uploadmymodel.com (2026-09-25). Nothing below is built yet.
+**Status:** holding page live at https://uploadmymodel.com (2026-09-25). Phase 0 started: the class
+profile and a school-sliced 3DBenchy are in the repo (`profiles/`, `test/golden/`,
+`docs/HARDWARE.md`). Nothing else is built yet.
 
 ---
 
@@ -43,20 +45,17 @@ and no student accounts.
 
 ## 2. What we think we know (verify in Phase 0)
 
-Treat every row as a guess until it is marked verified. The class profile is the source of truth.
+The full list, with where each fact came from, is in [docs/HARDWARE.md](docs/HARDWARE.md). Short
+version, from a real school G-code file (2026-09-25):
 
-| Fact | Value we expect | Verified? |
-|---|---|---|
-| Printer | LulzBot Workhorse (Marlin firmware, LulzBot build) | no |
-| Build volume | 280 × 280 × 285 mm | no |
-| Filament diameter | 2.85 mm | no |
-| Tool head / nozzle | shown in Cura LE's printer name (e.g. an SE-style 0.5 mm head) | no |
-| Bed | heated, PEI; auto-levels by probing corner washers after a nozzle wipe | no |
-| Start G-code | long LulzBot sequence (heat, wipe, probe, prime). Must be copied exactly | no |
-| SD card | full-size slot on the LCD. Marlin reads FAT16/FAT32, **not exFAT** | no |
-| Long file names | LCD probably shows them; must test | no |
-| Slicer today | Cura LulzBot Edition, version ? | no |
-| Material | ? (e.g. PLA from LulzBot / Polymaker) | no |
+- **TAZ Workhorse, SE tool head, 0.50 mm nozzle, 2.85 mm Polymaker PolyLite PLA**, Marlin firmware,
+  280 × 280 × 285 mm build volume.
+- Class profile `current_lulzbot_9_18` = **High Detail** (0.18 mm layers) + tree supports touching
+  the plate + 20% infill. 205 °C / 65 °C first layer, then 210 °C / 60 °C.
+- **School slices with Cura LE engine 4.13.2. Dalton's home PC has 4.13.17, and its start G-code is
+  different.** We copy the school version exactly until we know the printer's firmware.
+
+Not yet checked on the real printer: firmware version, SD card format, long file names.
 
 Why the SD card format matters: most cards bigger than 32 GB come formatted exFAT, and the printer
 will not see them. The student guide will say "use the class cards" and the teacher guide will say
@@ -88,6 +87,12 @@ Chromebook (Chrome)                            Cloudflare
   before calling the engine. Plan: work those out **once, offline**, from the teacher's exported
   profile, and store each class setting as a **frozen, flat list of every value**. The container
   only passes frozen values. Students pick a preset; they never send a setting.
+- **How to get the frozen values exactly (proposed, not tried yet):** Cura LE has a debug flag,
+  `--external-backend`, that makes it wait for an engine to connect instead of starting its own. A
+  small "pretend engine" script connects and records the whole slice job Cura sends: every
+  resolved setting, the start/end G-code already filled in, and the positioned model. Same idea as
+  the LightBurn capture for uploadmylaser. One capture per class setting gives us the frozen preset
+  with nothing re-invented. It must run with **the same Cura LE version as school** (4.13.2).
 - **Proof it matches:** a golden test slices the same models with Cura LE (on the teacher's PC) and
   with our container, then compares: start/end G-code identical, same temperatures, same layer
   count, total filament and print time within a few percent.
@@ -131,7 +136,9 @@ line of defense, and the teacher still starts every print.
 
 ### Phase 0: Gather and verify
 Dalton sends (see §6). Then:
-- Put the profile files in `profiles/` and write `docs/HARDWARE.md` with verified facts.
+- ~~Put the profile files in `profiles/` and write `docs/HARDWARE.md`.~~ Done 2026-09-25 from the
+  school benchy G-code.
+- Get the same Cura LE version as school onto a PC we can run scripts on, and try the capture.
 - Test the SD path on a real Chromebook: save a known-good Cura LE file to a class SD card through
   the dongle, eject, print it. Check how the file name shows on the LCD.
 - Engine spike: build CuraEngine (matching Cura LE's version) in Docker, slice a 20 mm cube with a
@@ -170,13 +177,15 @@ Dalton sends (see §6). Then:
 
 ## 6. What Dalton sends for Phase 0
 
-1. **Cura LE version** (Help → About).
-2. **Printer and tool head** exactly as Cura LE names them, and the **material** selected.
-3. **A project file:** load a small test model (a 20 mm cube is fine), select the class profile,
-   then File → Save Project. This `.3mf` holds the whole settings stack, which is what we need most.
-4. **The G-code** Cura LE makes from that same project: the real file you would put on the SD card.
-5. **The profile export:** Preferences → Configure Cura → Profiles → select it → Export
-   (`.curaprofile`).
+1. **Cura LE version.** Home: 4.13.17. **School: still needed** (the school G-code says engine
+   4.13.2).
+2. ~~Printer, tool head, material.~~ From the school G-code: Workhorse SE 0.50 mm, PolyLite PLA.
+3. **A project file** made at school: load a small test model (a 20 mm cube is fine), select the
+   class profile, then File → Save Project. Still wanted: it includes the model, so we can re-slice
+   the exact same thing.
+4. ~~The G-code.~~ School benchy received (`test/golden/`).
+5. **The profile export** from school: Preferences → Configure Cura → Profiles → select it → Export
+   (`.curaprofile`). Nice to have; the G-code footer already holds the profile's changes.
 6. **Which settings you change for students today** (e.g. supports, infill %, brim) and which ones
    they must never touch.
 7. **Class rules:** max print time, max size, prints per student, supports allowed or not.
@@ -186,7 +195,10 @@ Dalton sends (see §6). Then:
 
 ## 7. Open questions
 
-- Which Cura LE version, and can we build the matching CuraEngine version in Docker? (Phase 0)
+- Which Cura LE version is at school, and can we build the matching CuraEngine version in Docker?
+  (Phase 0)
+- Stay on school's older version forever, or upgrade school Cura and the printer firmware together
+  later? (Suggest: copy school exactly now; decide on upgrades after the pilot.)
 - Should the student's name go in the file name, the LCD message, both, or neither?
 - Do students need supports at all in version 1, or is "lay it flat" enough to start?
 - One class setting or several? (Suggest two to start: Normal and Strong.)
