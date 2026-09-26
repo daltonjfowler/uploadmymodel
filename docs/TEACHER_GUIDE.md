@@ -31,6 +31,14 @@ What works today (2026-09-26) and how to run it. Student steps are in
 5. **Save for the class.** Students get the change when they open or reload the page.
    **Back to the school profile** puts everything back (still needs Save).
 
+## Opening slicing for a class
+
+On the teacher page, **Slicing for this class**: keep the suggested phrase (or type your own),
+choose how long, press **Open slicing**, and put the big phrase on the board. Students type it the
+first time they press Slice. Everything else on the site works without it. **Close now** ends it
+early; otherwise it closes by itself. While it is closed nobody can wake the slicer, so there is
+nothing to pay for.
+
 ## What students can never change
 
 Temperatures, speeds, cooling, retraction, start and end G-code, and the filament. These come from
@@ -47,16 +55,14 @@ Cura LulzBot Edition 4.13.2's own profile files (the version the school uses), t
 
 ## Decisions waiting for you
 
-1. **Tree support infill.** Your rule is 0%. In school's 4.13.2 engine that gives hollow branches,
-   about half the support plastic of today's 15% (Benchy: 17.3 g against 20.6 g in total). They
-   are lighter and easier to snap off, but may be weaker. Print one test Benchy from the slicer
-   before deciding.
-2. **Going live with the slicer**: container size and cost. Measured with Docker limits on the
-   development PC: a supported Benchy takes about 80 s on a quarter CPU and 33 s on half a CPU.
-   See `container/README.md`.
-3. **Class phrase** (like uploadmycode and uploadmylaser): should the site stay open, or close
-   when no phrase is set?
-4. **Student name in the file**: only in the file name today. It could also show on the printer
-   screen during the print (an `M117` line).
-5. At school: note the Cura LE version (Help → About), and print one file from uploadmymodel next
-   to one from school Cura to compare.
+1. **Going live with the slicer** (1 vCPU / 3 GiB: a supported Benchy in about 16 s; roughly
+   $0.03-0.06 per busy class period, nothing outside open windows). See `docs/GO_LIVE.md` on the
+   `slicer-live` branch.
+2. **Student name on the printer screen** during the print (an `M117` line)? Today it is only in
+   the file name, which students can change.
+3. At school: note the Cura LE version (Help → About), print one file from uploadmymodel next to
+   one from school Cura, and run the **printer USB test** (`/usb-test/`) on a Chromebook for
+   "print from USB" (`docs/USB_PRINTING.md`).
+
+Decided 2026-09-26: tree supports always 0% infill (hollow branches in school's engine); the
+teacher opens slicing with a class phrase; students name their files.

@@ -44,7 +44,8 @@ const COMMON_HEADERS = [
   ['x-content-type-options', 'nosniff'],
   ['x-frame-options', 'DENY'],
   ['referrer-policy', 'strict-origin-when-cross-origin'],
-  ['permissions-policy', 'serial=(), usb=(), camera=(), microphone=(), geolocation=(), payment=()'],
+  // serial=(self): the printer USB test page (and later "print from USB"); nothing else gets it.
+  ['permissions-policy', 'serial=(self), usb=(), camera=(), microphone=(), geolocation=(), payment=()'],
   ['cross-origin-opener-policy', 'same-origin'],
   ['x-robots-tag', 'noindex, nofollow'],
 ];
