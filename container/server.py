@@ -185,11 +185,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("x-attempts", str(attempts))
             self.end_headers()
             self.wfile.write(gcode)
+        except (BrokenPipeError, ConnectionResetError):
+            # The caller went away (tab closed, request cancelled): nothing left to answer.
+            print(json.dumps({"message": "caller disconnected"}), flush=True)
         except Refused as e:
             self.reply_json(e.status, {"error": str(e)})
         except Exception as e:  # never leak a traceback to the caller
             print(json.dumps({"message": "slice crashed", "error": repr(e)}), flush=True)
-            self.reply_json(500, {"error": "internal error"})
+            try:
+                self.reply_json(500, {"error": "internal error"})
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
 
 if __name__ == "__main__":
