@@ -1,7 +1,7 @@
 # uploadmymodel
 
-Kid-safe web slicer for the classroom LulzBot Workhorse, built for Chromebook classrooms. Students
-open a 3D model, set it on the printer bed, pick print settings from safe lists (layer height,
+Classroom web slicer for the LulzBot Workhorse, with teacher-set limits, built for Chromebook
+classrooms. Students open a 3D model, set it on the printer bed, pick print settings from short lists (layer height,
 infill, infill pattern, walls, tree supports, brim), and download G-code to carry to the printer on
 an SD card. Temperatures, speeds and start/end G-code come only from the teacher's class profile.
 Internal district tool, sibling of [uploadmycode](https://uploadmycode.com) and
@@ -36,9 +36,17 @@ npm run icons       # redraw icon.svg and the PNG icons into web/public
 
 ## Credits
 
-3D view and model loading by [three.js](https://threejs.org) (MIT). Print profile values come from
-Cura LulzBot Edition's quality files, read, not copied as code.
+3D view and model loading by [three.js](https://threejs.org) and
+[three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) (both MIT). Print profiles use
+unmodified Cura LulzBot Edition 4.13.2 resource files (LGPL-3.0, see
+[engine/res4132/SOURCE.md](engine/res4132/SOURCE.md) and [NOTICE](NOTICE)). The container runs
+unmodified CuraEngine (AGPL-3.0, source at https://gitlab.com/lulzbot3d/cura-le/cura-engine-le).
+
+Independent school project. Not affiliated with or endorsed by FAME 3D / LulzBot, UltiMaker (Cura)
+or Polymaker. Names are trademarks of their owners.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE), except the Cura LulzBot Edition files and the data made from them:
+see [NOTICE](NOTICE). Third-party notices for the site are in
+[web/public/licenses.txt](web/public/licenses.txt).

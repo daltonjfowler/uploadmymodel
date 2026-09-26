@@ -1,0 +1,43 @@
+uploadmymodel
+Copyright (c) 2026 Dalton Fowler
+
+This project is licensed under the MIT License (see LICENSE), except for the parts listed below.
+
+Cura LulzBot Edition resource files (LGPL-3.0)
+----------------------------------------------
+engine/res4132/ holds unmodified resource files from Cura LulzBot Edition 4.13.2, licensed under
+the GNU Lesser General Public License v3.0. Copyright Ultimaker B.V., LulzBot / FAME 3D and other
+contributors. The licence texts are next to them (engine/res4132/COPYING.LESSER and
+engine/res4132/COPYING); where they come from is in engine/res4132/SOURCE.md.
+Source: https://gitlab.com/lulzbot3d/cura-le/cura-lulzbot
+
+Data derived from those files is LGPL-3.0-derived data, not MIT:
+- engine/reference/ (settings resolved from those files)
+- profiles/ (the class profile, decoded from school G-code made with those files)
+- the start and end G-code text in test/golden/ (from the Cura LulzBot Edition start/end G-code)
+
+CuraEngine (AGPL-3.0), not in this repo
+----------------------------------------
+Slicing is done by CuraEngine 4.13.2, licensed under the GNU Affero General Public License v3.0.
+It is not part of this repository. container/Dockerfile downloads the official, unmodified
+Cura LulzBot Edition 4.13.2 AppImage at build time (checked by sha256) and runs its CuraEngine
+unchanged.
+Source: https://gitlab.com/lulzbot3d/cura-le/cura-engine-le
+
+3DBenchy
+--------
+test/golden/ is G-code of the 3DBenchy test model (the mesh name in the file). 3DBenchy is
+CC0 / public domain since 2025.
+
+Front-end libraries bundled into the site
+-----------------------------------------
+- three.js (MIT), https://threejs.org
+- three-mesh-bvh (MIT), https://github.com/gkjohnson/three-mesh-bvh
+- fflate (MIT), https://github.com/101arrowz/fflate (part of three.js's addons, for 3MF files)
+
+Their full licence notices are served with the site at /licenses.txt (web/public/licenses.txt).
+
+Trademarks
+----------
+Independent school project. Not affiliated with or endorsed by FAME 3D / LulzBot, UltiMaker (Cura)
+or Polymaker. Names are trademarks of their owners.

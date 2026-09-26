@@ -47,7 +47,7 @@ function infillWords(v) {
 
 function angleWords(v) {
   if (v <= 45) return 'Lots of support. Even gentle slopes get held up. Uses more plastic.';
-  if (v <= 55) return 'More support than normal. Safer for tricky models.';
+  if (v <= 55) return 'More support than normal. Better for tricky models.';
   if (v === 60) return "LulzBot's default. Right for most models.";
   if (v <= 70) return 'Less support. Steep slopes print on their own but may droop a little.';
   return 'Very little support. Only nearly flat overhangs get held up. Expect droop.';

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Kid-safe web slicer for the classroom LulzBot Workhorse, built for Chromebook classrooms.",
+  "description": "Classroom web slicer for the LulzBot Workhorse, with teacher-set limits, built for Chromebook classrooms.",
   "license": "MIT",
   "scripts": {
     "dev": "npm run build && wrangler dev --enable-containers=false",

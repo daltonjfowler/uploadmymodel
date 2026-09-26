@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>uploadmymodel: privacy and legal</title>
+  <meta name="description" content="What uploadmymodel does with your files, safety, licences and trademarks.">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <style>
+    :root { --bg: #ffffff; --ink: #14181d; --muted: #5b6570; --line: #d5dae0; --accent: #c2410c; color-scheme: light; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #121314; --ink: #ecedee; --muted: #a0a3a8; --line: #343639; --accent: #fb923c; color-scheme: dark; }
+    }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding-inline: 16px; padding-block: 24px 48px; }
+    main { max-width: 68ch; margin: 0 auto; }
+    h1 { font-size: 1.7rem; line-height: 1.2; margin: 0 0 4px; }
+    h2 { font-size: 1.15rem; margin: 28px 0 6px; padding-top: 18px; border-top: 1px solid var(--line); }
+    p, li { color: var(--ink); }
+    .muted { color: var(--muted); }
+    a { color: var(--accent); }
+    ul { padding-left: 20px; }
+    code { font-size: .92em; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="muted"><a href="/">← Back to uploadmymodel</a></p>
+  <h1>Privacy and legal</h1>
+  <p class="muted">uploadmymodel · last updated 2026-09-26</p>
+
+  <h2>What this is</h2>
+  <p>uploadmymodel is an independent classroom project made by <a href="https://daltonjfowler.com" rel="noopener">Dalton Fowler</a>, a teacher, for his school district's classes. It is not a commercial product and has no accounts, ads or payments.</p>
+
+  <h2>Safety</h2>
+  <p><strong>uploadmymodel is not a safety system.</strong> It limits the print settings students can change, checks models, and makes print files (G-code) for the printer. The limits it applies reduce mistakes; they do not make a job safe.</p>
+  <ul>
+    <li>A trained adult checks every file and supervises the machine for the whole job.</li>
+    <li>The nozzle and the bed get hot. Do not touch them while the printer is on or cooling down.</li>
+    <li>Stay near a running print, and know how to stop it from the printer.</li>
+  </ul>
+  <p>The software is provided "as is", without warranty of any kind, as its open-source licence says.</p>
+
+  <h2>Privacy</h2>
+  <ul>
+    <li>Your model stays in your browser until you press <strong>Slice</strong>. Then it is sent to the slicer, sliced in a temporary folder and deleted straight after. Models are never saved on the server.</li>
+    <li>The name you can type (optional) is only used to make the print file name.</li>
+    <li>The teacher's class setup (which settings are locked, the class defaults, the note to students) and the class phrase are kept on the server for the teacher. The class phrase is deleted when the slicing window closes.</li>
+    <li>Your browser keeps these on this device only: your plate (in IndexedDB, so it comes back after a reload), your name, the print settings you changed, a random id used only to keep the slicer fair between students, your theme, and the class phrase for the open tab only. On the teacher page, the teacher key is kept only if the teacher ticks <em>Remember on this computer</em>.</li>
+    <li>No accounts, no cookies, no ads, no tracking. Cloudflare adds a Web Analytics script to the site; this site's security settings block it, so it collects nothing.</li>
+    <li>The site runs on Cloudflare. Like any web host, Cloudflare keeps short request logs (for example the page asked for, the time, the browser and the network address) for up to 7 days, to keep the site running. They are not used for anything else.</li>
+    <li>Your browser may keep your own settings and work (for example your theme, and your plate and your name) on this device only. Clearing site data removes them.</li>
+  </ul>
+
+  <h2>Trademarks</h2>
+  <p>uploadmymodel is not affiliated with, made by, tested by or endorsed by FAME 3D (LulzBot), UltiMaker (Cura) or Polymaker. LulzBot, Cura, UltiMaker and PolyLite are trademarks of their owners and are named here only to say which machines and programs the site works with.</p>
+
+  <h2>Open source and licences</h2>
+  <ul>
+    <li>The site's own code is open source under the MIT licence: <a href="https://github.com/daltonjfowler/uploadmymodel" rel="noopener">github.com/daltonjfowler/uploadmymodel</a>.</li>
+    <li>Slicing is done on the server by CuraEngine 4.13.2 from Cura LulzBot Edition, used unmodified. CuraEngine is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). Its source code is at <a href="https://gitlab.com/lulzbot3d/cura-le/cura-engine-le" rel="noopener">gitlab.com/lulzbot3d/cura-le/cura-engine-le</a>.</li>
+    <li>The print profiles are unmodified Cura LulzBot Edition 4.13.2 files, licensed under the GNU Lesser General Public License v3.0 (LGPL-3.0). They are in the repository with their licence texts, in <a href="https://github.com/daltonjfowler/uploadmymodel/tree/main/engine/res4132" rel="noopener"><code>engine/res4132/</code></a>.</li>
+    <li>The page uses three.js, three-mesh-bvh and fflate (all MIT). Their licence notices are at <a href="/licenses.txt">/licenses.txt</a>.</li>
+  </ul>
+
+  <h2>Contact</h2>
+  <p>Questions or a problem: contact Dalton Fowler through <a href="https://daltonjfowler.com" rel="noopener">daltonjfowler.com</a>.</p>
+</main>
+</body>
+</html>
