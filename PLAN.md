@@ -16,9 +16,11 @@ and no student accounts.
 | sent over Web Serial | sent over Web Serial | **downloaded**, copied to SD card by hand |
 | Uno board fixed on the server | power/speed presets on the server | print profiles frozen on the server |
 
-**Status:** holding page live at https://uploadmymodel.com (2026-09-25). Phase 0 started: the class
-profile and a school-sliced 3DBenchy are in the repo (`profiles/`, `test/golden/`,
-`docs/HARDWARE.md`). Nothing else is built yet.
+**Status (2026-09-25 evening):** the student page is live at https://uploadmymodel.com as a
+framework: open STL/OBJ/3MF, the Workhorse bed in 3D, move / scale / rotate / lay flat / mirror,
+red overhang shading, Cura-style Recommended and Custom settings, and a Slice button whose request
+the Worker fully checks. **There is no slicing engine yet**: Slice answers "settings checked, engine
+not connected" (HTTP 501). Phase 0 facts are in `profiles/`, `test/golden/`, `docs/HARDWARE.md`.
 
 ---
 
@@ -115,8 +117,9 @@ Chromebook (Chrome)                            Cloudflare
 |---|---|
 | Upload STL (first), then OBJ and 3MF | Change temperatures, speeds, cooling, retraction |
 | Turn, lay flat, scale (shown in mm) | Edit start/end G-code or the material |
-| Pick one of the teacher's class settings (e.g. Draft / Normal / Strong) | Type in any setting number |
-| Supports on/off, if the teacher allows it | Go past the bed size or the teacher's max print time |
+| Pick layer height (0.18 / 0.25 / 0.38 mm, i.e. Cura LE's High Detail / Standard / High Speed profile) | Type in any setting number |
+| Infill 0-100% in steps of 5, infill pattern from a list of 7, 2-4 walls | Change support infill: tree supports are always 0% (Dalton, 2026-09-25) |
+| Tree supports: none / touching build plate / everywhere. Skirt or brim | Go past the bed size or the teacher's max print time |
 | Type their name for the file | Print more copies than the teacher allows |
 
 Server-side checks before any G-code is returned:
@@ -153,7 +156,13 @@ Dalton sends (see §6). Then:
 - Golden tests with 3-5 real student models. Measure slice time and memory on `basic`.
 - **Review gate:** print the golden models from our G-code. They should look like Cura LE's.
 
-### Phase 2: Student page
+### Phase 2: Student page (framework built early, 2026-09-25)
+Dalton asked for "an online Cura" feel before the engine exists, so the page came first. Built:
+Cura-like layout (floating cards over the plate), Recommended and Custom tabs, hover help, locked
+teacher settings shown greyed out, overhang shading at LulzBot's 60° support angle, a Below view,
+object list, arrange, inch-model detection, name → file name, light/dark. All student choices live
+in `shared/settings.js`, which the Worker also imports to check every request. Still to do here:
+the layer preview (Preview tab) once there is G-code, and a real test with students.
 - Upload, 3D bed preview, turn / lay flat / scale, class-setting picker, Slice, results, Download.
 - Friendly errors ("Your model is bigger than the printer. Try 50%.").
 - Theme toggle and footer like the other two sites.
@@ -204,3 +213,12 @@ Dalton sends (see §6). Then:
 - Do students need supports at all in version 1, or is "lay it flat" enough to start?
 - One class setting or several? (Suggest two to start: Normal and Strong.)
 - Is the Workhorse the only printer, or will other LulzBots need profiles later?
+- Does school's engine (4.13.2) have Lightning infill? Home Cura 4.13.17 does. If not, remove it
+  from `shared/settings.js` (the Worker then refuses it too).
+- Student-picked layer height = the whole Cura quality profile (speeds and first layer come with
+  it). Is that right, or should layer height change alone on top of High Detail?
+- Edge margin: the page keeps models 5 mm from the bed edge. Check against Cura LE's disallowed
+  areas for the Workhorse.
+- Worth a look before building the container: CuraEngine compiled to WebAssembly would slice on
+  the Chromebook itself with no container cost. Not checked: whether a 4.13 build exists, and speed
+  on a slow Chromebook.

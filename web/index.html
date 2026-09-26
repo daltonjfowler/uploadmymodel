@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>uploadmymodel</title>
+  <meta name="description" content="Slice your 3D model with your class's printer settings, then carry it to the LulzBot on an SD card.">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#9A3412">
+  <!-- Blocking on purpose: sets data-theme before the first paint. -->
+  <script src="/theme-boot.js"></script>
+</head>
+<body>
+  <header class="titlebar">
+    <strong class="brand"><img src="/icon.svg" alt="" width="36" height="36">uploadmymodel</strong>
+    <nav class="stages" aria-label="Steps">
+      <button class="stage on" type="button" data-stage="prepare" aria-current="step">Prepare</button>
+      <button class="stage" type="button" data-stage="preview" disabled title="Slice your model first. The layer preview comes with the slicer.">Preview</button>
+    </nav>
+    <button id="printerChip" class="chip" type="button" aria-haspopup="dialog">
+      <span class="chip-dot" aria-hidden="true"></span>
+      <span class="chip-text"><strong>LulzBot TAZ Workhorse</strong><small>SE 0.50 mm · PolyLite PLA</small></span>
+      <span aria-hidden="true">🔒</span>
+    </button>
+    <span class="grow"></span>
+    <button id="help" class="toplink" type="button">ⓘ How to print</button>
+    <button id="theme" class="themebtn" type="button">🖥️ System</button>
+  </header>
+
+  <main id="stage" class="stage-area">
+    <div id="viewport" class="viewport"></div>
+
+    <div class="open-group">
+      <button id="open" class="open-btn" type="button" title="Open a model (Ctrl+O)">
+        <span aria-hidden="true">📂</span> Open model
+      </button>
+      <input id="fileInput" type="file" multiple hidden>
+    </div>
+
+    <div class="tools" role="toolbar" aria-label="Model tools" aria-orientation="vertical">
+      <button class="tool" type="button" data-tool="move" title="Move (T)"><span class="ti" aria-hidden="true">✥</span><span class="tl">Move</span></button>
+      <button class="tool" type="button" data-tool="scale" title="Scale (S)"><span class="ti" aria-hidden="true">⤢</span><span class="tl">Scale</span></button>
+      <button class="tool" type="button" data-tool="rotate" title="Rotate (R)"><span class="ti" aria-hidden="true">⟳</span><span class="tl">Rotate</span></button>
+      <button class="tool" type="button" data-tool="mirror" title="Mirror (M)"><span class="ti" aria-hidden="true">⇋</span><span class="tl">Mirror</span></button>
+      <span class="tool-sep"></span>
+      <button class="tool" type="button" id="dupBtn" title="Duplicate (Ctrl+D)"><span class="ti" aria-hidden="true">⧉</span><span class="tl">Copy</span></button>
+      <button class="tool danger" type="button" id="delBtn" title="Delete (Delete key)"><span class="ti" aria-hidden="true">🗑</span><span class="tl">Delete</span></button>
+    </div>
+    <section id="toolPanel" class="tool-panel card" hidden aria-live="polite"></section>
+
+    <div id="empty" class="empty">
+      <div class="empty-card">
+        <img src="/icon.svg" alt="" width="72" height="72">
+        <h1>Drop your model here</h1>
+        <p>STL, OBJ or 3MF, from Tinkercad, Onshape, Fusion or Thingiverse.</p>
+        <div class="empty-actions">
+          <button id="emptyOpen" class="primary big" type="button">📂 Open model</button>
+          <button id="sample" class="ghost" type="button">Try a sample</button>
+        </div>
+      </div>
+    </div>
+
+    <aside id="settings" class="settings card" aria-label="Print settings"></aside>
+
+    <div class="bottom-left">
+      <section id="objects" class="objects card" hidden>
+        <button id="objectsHead" class="objects-head" type="button" aria-expanded="true">
+          <span>Objects on the plate</span><span id="objCount" class="count"></span><span class="chev" aria-hidden="true">▾</span>
+        </button>
+        <ul id="objectList" class="object-list"></ul>
+        <div class="objects-actions">
+          <button id="arrange" class="linkbtn" type="button" title="Tidy everything into rows (Ctrl+R)">▦ Arrange all</button>
+          <button id="clearPlate" class="linkbtn" type="button">✕ Clear plate</button>
+        </div>
+      </section>
+      <div class="views card" role="group" aria-label="Camera">
+        <button type="button" data-view="home" title="3D view">3D</button>
+        <button type="button" data-view="front" title="Front">Front</button>
+        <button type="button" data-view="top" title="Top">Top</button>
+        <button type="button" data-view="left" title="Left side">Left</button>
+        <button type="button" data-view="right" title="Right side">Right</button>
+        <button type="button" data-view="below" title="From underneath: see the red parts that need support">Below</button>
+        <button type="button" data-view="frame" title="Zoom to the selected model (F)">⌖</button>
+      </div>
+    </div>
+
+    <section id="action" class="action card" aria-live="polite"></section>
+
+    <div id="hint" class="hint" hidden role="tooltip"></div>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <div id="drop" class="drop-overlay" hidden><div>Drop to put it on the printer bed</div></div>
+    <div id="busy" class="busy" hidden><div class="spinner" aria-hidden="true"></div><span id="busyText">Loading…</span></div>
+  </main>
+
+  <footer class="footer">
+    <span>Internal district tool.</span>
+    <a href="https://uploadmycode.com" target="_blank" rel="noopener">uploadmycode</a>
+    <a href="https://uploadmylaser.com" target="_blank" rel="noopener">uploadmylaser</a>
+    <a href="https://teachchat.app" target="_blank" rel="noopener">teachChat</a>
+    <a href="https://daltonjfowler.com" target="_blank" rel="noopener">Made by Dalton Fowler</a>
+    <a href="https://github.com/daltonjfowler/uploadmymodel" target="_blank" rel="noopener">Open source</a>
+  </footer>
+
+  <dialog id="helpDialog" class="dialog">
+    <form method="dialog">
+      <h2>How to print</h2>
+      <ol class="steps">
+        <li><strong>Open your model.</strong> Export an STL from Tinkercad (Export → .STL), then drop it on the bed.</li>
+        <li><strong>Set it on the bed.</strong> Drag it to move it. Use <em>Rotate → Lay flat</em> so a flat side is down. Red parts hang in the air and need supports.</li>
+        <li><strong>Pick your settings.</strong> The class settings work for most prints. Change them only if you know why.</li>
+        <li><strong>Slice, then save to the SD card.</strong> Put the file on a class SD card, <em>eject it</em>, then carry it to the printer.</li>
+        <li><strong>Print.</strong> Pick your file on the printer screen. Your teacher starts every print.</li>
+      </ol>
+      <h3>Moving around</h3>
+      <table class="keys">
+        <tr><td>Turn the view</td><td>Drag on empty space</td></tr>
+        <tr><td>Slide the view</td><td>Right-drag, or Shift + drag</td></tr>
+        <tr><td>Zoom</td><td>Mouse wheel, or two fingers on the touchpad</td></tr>
+        <tr><td>Move a model</td><td>Drag it</td></tr>
+        <tr><td>Tools</td><td><kbd>T</kbd> move · <kbd>S</kbd> scale · <kbd>R</kbd> rotate · <kbd>M</kbd> mirror</td></tr>
+        <tr><td>Copy / delete</td><td><kbd>Ctrl</kbd>+<kbd>D</kbd> · <kbd>Delete</kbd></td></tr>
+      </table>
+      <p class="note">Nothing leaves this Chromebook until you press Slice. Models are sliced and forgotten, never saved.</p>
+      <div class="dialog-actions"><button class="primary" value="close">Got it</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="printerDialog" class="dialog">
+    <form method="dialog">
+      <h2>Class printer</h2>
+      <table class="keys">
+        <tr><td>Printer</td><td>LulzBot TAZ Workhorse</td></tr>
+        <tr><td>Tool head</td><td>SE, 0.50 mm nozzle</td></tr>
+        <tr><td>Filament</td><td>Polymaker PolyLite PLA, 2.85 mm</td></tr>
+        <tr><td>Build size</td><td>280 × 280 × 285 mm</td></tr>
+        <tr><td>File goes by</td><td>SD card</td></tr>
+      </table>
+      <p class="note">Your teacher sets the printer, filament, temperatures and speeds. They are the same for everyone, so any free printer can run your file.</p>
+      <div class="dialog-actions"><button class="primary" value="close">OK</button></div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

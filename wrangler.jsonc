@@ -10,6 +10,7 @@
     { "pattern": "www.uploadmymodel.com", "custom_domain": true }
   ],
   "workers_dev": true,
+  // public/ is built from web/ by `npm run build` (npm run deploy does it first).
   "assets": {
     "directory": "./public/",
     "binding": "ASSETS",

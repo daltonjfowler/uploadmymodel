@@ -6,14 +6,22 @@
   "description": "Kid-safe web slicer for the classroom LulzBot Workhorse, built for Chromebook classrooms.",
   "license": "MIT",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "dev": "npm run build && wrangler dev",
+    "dev:web": "vite web",
+    "build": "vite build web",
+    "deploy": "npm run build && wrangler deploy",
+    "test": "node --test \"test/*.test.mjs\"",
+    "icons": "node scripts/make-icons.mjs web/public"
   },
   "devDependencies": {
+    "vite": "8.2.2",
     "wrangler": "4.127.1"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
     "workerd@1.20260828.1": true
+  },
+  "dependencies": {
+    "three": "0.186.1"
   }
 }

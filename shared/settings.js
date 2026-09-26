@@ -1,0 +1,254 @@
+// What students may change, and what they may not. One file, imported by both the student page
+// (web/src/) and the Worker (src/worker.js), so the server checks exactly what the page offers.
+//
+// Every student setting is a choice from a short list or a stepped slider. There is no free text
+// box anywhere: the Worker rejects any value that is not on the list (validateSettings below).
+// Temperatures, speeds, cooling, retraction and start/end G-code are not settings at all. They come
+// from the class profile on the server (profiles/current_lulzbot_9_18.json) and are only shown,
+// greyed out, so students can see what the printer will do.
+//
+// Values come from Cura LulzBot Edition's own files for the Workhorse SE 0.50 mm + PolyLite PLA
+// (resources/quality/taz_workhorse/se/, resources/definitions/lulzbot.def.json), checked against
+// the school G-code (docs/HARDWARE.md).
+
+export const PRINTER = {
+  name: 'LulzBot TAZ Workhorse',
+  toolHead: 'SE 0.50 mm',
+  material: 'PolyLite PLA',
+  filamentMm: 2.85,
+  // Build volume in mm (Cura LE taz.def.json). The bed is drawn centred on 0,0; the slicer
+  // later moves the model to printer coordinates (0..280).
+  bed: { x: 280, y: 280, z: 285 },
+  // Keep models this far from the bed edge. The skirt and the nozzle wipe need room. A guess until
+  // checked on the printer; Cura LE uses a few mm of "disallowed" border on the Workhorse.
+  edgeMarginMm: 5,
+  // Cura's support_angle for LulzBot (lulzbot.def.json): faces leaning past 60° from upright get
+  // support. The page paints those faces red, so "red" means what the slicer will hold up.
+  supportAngleDeg: 60,
+};
+
+// The three Cura LE quality profiles for this tool head and filament. Picking a layer height picks
+// the whole profile, like Cura's Recommended mode: speeds and first layer come with it.
+export const QUALITIES = [
+  {
+    id: 'high_speed',
+    curaName: 'High Speed',
+    label: 'Fast',
+    layerMm: 0.38,
+    firstLayerMm: 0.4,
+    topBottomMm: 1.4,
+    blurb: 'Thick layers. Prints fastest. You can see the lines.',
+  },
+  {
+    id: 'standard',
+    curaName: 'Standard',
+    label: 'Standard',
+    layerMm: 0.25,
+    firstLayerMm: 0.35,
+    topBottomMm: 1.25,
+    blurb: 'Good balance of speed and looks.',
+  },
+  {
+    id: 'high_detail',
+    curaName: 'High Detail',
+    label: 'Fine detail',
+    layerMm: 0.18,
+    firstLayerMm: 0.35,
+    topBottomMm: 1.05,
+    blurb: 'Thin layers. Smooth and detailed. Slowest.',
+  },
+];
+
+export const INFILL_PATTERNS = [
+  { id: 'grid', label: 'Grid', blurb: 'Criss-cross lines. The class default. Strong and quick.' },
+  { id: 'lines', label: 'Lines', blurb: 'Straight lines, turning each layer. Fast, a bit weaker.' },
+  { id: 'triangles', label: 'Triangles', blurb: 'Triangles are stiff. Good for parts that get pushed on.' },
+  { id: 'trihexagon', label: 'Tri-hexagon', blurb: 'Triangles and hexagons. Strong in every flat direction.' },
+  { id: 'cubic', label: 'Cubic', blurb: 'Little tilted cubes stacked up. Strong in every direction.' },
+  { id: 'gyroid', label: 'Gyroid', blurb: 'Wavy, like a sponge. Strong every way. Looks cool in the preview.' },
+  // Lightning is in Cura LE 4.13.17's list. Whether school's engine 4.13.2 has it is not checked yet
+  // (PLAN.md §7). If it does not, drop it here and the Worker will reject it too.
+  { id: 'lightning', label: 'Lightning', blurb: 'Tree-like, only holds up the top. Fastest and lightest, but weak.' },
+];
+
+export const SUPPORT_CHOICES = [
+  { id: 'none', label: 'None', blurb: 'No supports. Fine if nothing hangs out in the air.' },
+  { id: 'buildplate', label: 'Touching build plate', blurb: 'Tree supports grow only from the bed. The class default. Easy to snap off.' },
+  { id: 'everywhere', label: 'Everywhere', blurb: 'Tree supports can also grow from your model. For tricky shapes. Harder to clean.' },
+];
+
+export const ADHESION_CHOICES = [
+  { id: 'skirt', label: 'Skirt', blurb: 'A line drawn around your model to get the plastic flowing. The class default.' },
+  { id: 'brim', label: 'Brim', blurb: 'A flat rim stuck to the edge of your model, like a hat brim. Helps tall or tiny parts stay down. Peel it off after.' },
+];
+
+export const WALL_CHOICES = [
+  { id: 2, label: '2 walls (1.0 mm)', blurb: 'The class default.' },
+  { id: 3, label: '3 walls (1.5 mm)', blurb: 'Tougher outside. Takes a little longer.' },
+  { id: 4, label: '4 walls (2.0 mm)', blurb: 'Very tough outside, for parts that get screwed or snapped.' },
+];
+
+// The class profile, current_lulzbot_9_18: High Detail + tree supports touching the plate + 20%
+// infill. Grid is Cura LE's LulzBot default pattern; skirt and 2 walls come from the profile.
+export const CLASS_DEFAULTS = Object.freeze({
+  quality: 'high_detail',
+  infillDensity: 20,
+  infillPattern: 'grid',
+  walls: 2,
+  support: 'buildplate',
+  adhesion: 'skirt',
+});
+
+export const INFILL = { min: 0, max: 100, step: 5 };
+
+// Tree supports are always hollow: 0% support infill (Dalton's rule, 2026-09-25). Not a setting.
+export const TREE_SUPPORT_INFILL = 0;
+
+// Every student setting, in panel order. `section` groups them in Custom mode.
+export const SETTINGS = [
+  {
+    id: 'quality', section: 'quality', label: 'Layer height', kind: 'choice',
+    options: QUALITIES.map((q) => ({ id: q.id, label: `${q.layerMm.toFixed(2)} mm · ${q.label}`, blurb: q.blurb })),
+    help: 'How thick each layer of plastic is. Thin layers look smoother but take longer.',
+  },
+  {
+    id: 'walls', section: 'walls', label: 'Wall count', kind: 'choice', options: WALL_CHOICES,
+    help: 'How many outlines go around the outside of your model. More walls make it stronger.',
+  },
+  {
+    id: 'infillDensity', section: 'infill', label: 'Infill density', kind: 'range', unit: '%', ...INFILL,
+    help: 'How full the inside is. 0% is hollow, 100% is solid. 15 to 25% is right for most prints.',
+  },
+  {
+    id: 'infillPattern', section: 'infill', label: 'Infill pattern', kind: 'choice', options: INFILL_PATTERNS,
+    help: 'The shape printed inside your model.',
+  },
+  {
+    id: 'support', section: 'support', label: 'Tree supports', kind: 'choice', options: SUPPORT_CHOICES,
+    help: 'Supports hold up parts that hang in the air, like a chin or an arm. Parts that lean more than 45° usually need them. They are shown red on your model.',
+  },
+  {
+    id: 'adhesion', section: 'adhesion', label: 'Build plate adhesion', kind: 'choice', options: ADHESION_CHOICES,
+    help: 'Helps the first layer stick to the bed.',
+  },
+];
+
+export const SECTIONS = [
+  { id: 'quality', label: 'Quality', icon: '▤' },
+  { id: 'walls', label: 'Walls', icon: '▢' },
+  { id: 'infill', label: 'Infill', icon: '▦' },
+  { id: 'support', label: 'Support', icon: '⟟' },
+  { id: 'adhesion', label: 'Build plate adhesion', icon: '▭' },
+];
+
+// Shown greyed out with a lock. Values from the school G-code (docs/HARDWARE.md). The server
+// never reads these: the frozen class profile is the only source.
+export const LOCKED = [
+  { section: 'Material', rows: [
+    ['Filament', 'Polymaker PolyLite PLA, 2.85 mm'],
+    ['Nozzle temperature', '210 °C (205 °C first layer)'],
+    ['Bed temperature', '60 °C (65 °C first layer)'],
+  ] },
+  { section: 'Speed', rows: [
+    ['Print speed', 'Set by the layer height you pick'],
+    ['First layer', 'Slow, so it sticks'],
+  ] },
+  { section: 'Cooling', rows: [
+    ['Part fan', 'Off on layer 1, full from layer 5'],
+  ] },
+  { section: 'Printer', rows: [
+    ['Start', 'Wipe nozzle, probe bed, prime'],
+    ['End', 'Cool bed to 35 °C, present the print'],
+  ] },
+];
+
+const byId = (list, id) => list.find((o) => o.id === id);
+
+export function qualityById(id) {
+  return byId(QUALITIES, id) ?? byId(QUALITIES, CLASS_DEFAULTS.quality);
+}
+
+/**
+ * Check a settings object from the browser. Unknown keys are dropped; any known key with a value
+ * that is not allowed is an error (never silently fixed, so a bug shows up instead of printing
+ * something the student did not pick). Missing keys take the class default.
+ * @returns {{ ok: true, settings: object } | { ok: false, errors: string[] }}
+ */
+export function validateSettings(input) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    return { ok: false, errors: ['settings must be an object'] };
+  }
+  const settings = { ...CLASS_DEFAULTS };
+  const errors = [];
+  for (const def of SETTINGS) {
+    if (!(def.id in input)) continue;
+    const value = input[def.id];
+    if (def.kind === 'choice') {
+      const option = def.options.find((o) => o.id === value);
+      if (option) settings[def.id] = option.id;
+      else errors.push(`${def.id}: not one of the choices`);
+    } else if (def.kind === 'range') {
+      const okNumber = typeof value === 'number' && Number.isInteger(value);
+      if (okNumber && value >= def.min && value <= def.max && (value - def.min) % def.step === 0) {
+        settings[def.id] = value;
+      } else {
+        errors.push(`${def.id}: must be ${def.min} to ${def.max} in steps of ${def.step}`);
+      }
+    }
+  }
+  return errors.length ? { ok: false, errors } : { ok: true, settings };
+}
+
+/**
+ * The student's choices as Cura setting keys, layered on top of the frozen quality profile by the
+ * slicer (Phase 1). Only these keys ever come from the student.
+ */
+export function toCuraOverrides(settings) {
+  const s = { ...CLASS_DEFAULTS, ...settings };
+  const supportOn = s.support !== 'none';
+  return {
+    quality_type: qualityById(s.quality).curaName.toLowerCase(),
+    wall_line_count: s.walls,
+    infill_sparse_density: s.infillDensity,
+    infill_pattern: s.infillPattern,
+    support_enable: supportOn,
+    support_structure: 'tree',
+    support_type: s.support === 'everywhere' ? 'everywhere' : 'buildplate',
+    support_infill_rate: TREE_SUPPORT_INFILL,
+    adhesion_type: s.adhesion,
+  };
+}
+
+/** Short summary for the settings header, like Cura's "Fine detail · 20% · Tree · Skirt". */
+export function summarize(settings) {
+  const s = { ...CLASS_DEFAULTS, ...settings };
+  const q = qualityById(s.quality);
+  const support = s.support === 'none' ? 'No support' : 'Tree support';
+  return `${q.layerMm.toFixed(2)} mm · ${s.infillDensity}% · ${support} · ${byId(ADHESION_CHOICES, s.adhesion).label}`;
+}
+
+export function isClassDefault(settings) {
+  return Object.keys(CLASS_DEFAULTS).every((k) => settings[k] === CLASS_DEFAULTS[k]);
+}
+
+// Model limits the Worker enforces before any slicing (PLAN.md §4). Teacher-set later.
+export const LIMITS = {
+  maxUploadBytes: 40 * 1024 * 1024,
+  maxTriangles: 1_500_000,
+  maxObjects: 12,
+  maxNameLength: 24,
+};
+
+/** Student name → safe file name part: lowercase letters, digits, dashes. */
+export function safeNamePart(text, fallback = 'model') {
+  const cleaned = String(text ?? '')
+    .normalize('NFKD')
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, LIMITS.maxNameLength);
+  return cleaned || fallback;
+}

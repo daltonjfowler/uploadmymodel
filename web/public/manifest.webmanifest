@@ -1,0 +1,14 @@
+{
+  "name": "uploadmymodel",
+  "short_name": "uploadmymodel",
+  "description": "Slice your 3D model with your class's printer settings, then carry it to the LulzBot on an SD card.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#9A3412",
+  "theme_color": "#9A3412",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
