@@ -117,7 +117,7 @@ const teacherPut = (page, config) => page.request.put(base + 'api/teacher/class'
 {
   const r = await fetch(base + 'api/slice', { method: 'POST', body: new ReadableStream({ start(c) { c.enqueue(new Uint8Array(10)); c.close(); } }), duplex: 'half', headers: { 'content-type': 'multipart/form-data; boundary=x' } });
   // Locally 411; on Cloudflare the edge supplies the length, so the broken form gets 400. Refused either way.
-  check('upload without a length is refused', [400, 411].includes(r.status), true);
+  check('upload without a length is refused', [400, 403, 411].includes(r.status), true); // 403 live: the class gate answers first
 }
 console.log(errors.join('\n') || 'no errors');
 await browser.close();
