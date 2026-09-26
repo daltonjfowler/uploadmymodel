@@ -16,6 +16,7 @@ small container than running several at once. Tree supports crash CuraEngine now
 import json
 import os
 import re
+import signal
 import struct
 import subprocess
 import sys
@@ -255,7 +256,19 @@ def warm_up():
         print(json.dumps({"message": "warm-up failed", "error": repr(e)}), flush=True)
 
 
+def stop(signum, frame):
+    # THE sleep fix (uploadmycode's September 2026 bill, same bug). This process is PID 1 in the
+    # container, and Linux ignores an unhandled SIGTERM for PID 1: Cloudflare's idle stop never
+    # landed, so a started slicer stayed awake (and billed 3 GiB) until the next deploy replaced it.
+    # The idle stop never comes mid-slice (a request in flight keeps the container awake); a deploy
+    # or eviction may, so wait up to 2 s for a running slice, then go.
+    print(json.dumps({"message": "shutdown", "signal": signum}), flush=True)
+    got = lock.acquire(timeout=2)
+    os._exit(0 if got else 1)
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, stop)
     print(json.dumps({"message": "slicer listening", "port": PORT, "engine": ENGINE_VERSION}), flush=True)
     threading.Thread(target=warm_up, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

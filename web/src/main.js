@@ -746,7 +746,16 @@ function renderAction() {
     // Supported models can take a minute on the school's slicer: show that it is still working.
     const status = el('p', { class: 'note slicing-note' });
     const tick = () => {
-      const s = Math.round((Date.now() - slice.startedAt) / 1000);
+      // Waiting for a free slicer (other students' models are ahead): say where in line.
+      const line = slice.line;
+      if (line?.state === 'waiting') {
+        const wait = line.startsInSeconds >= 60 ? `about ${Math.round(line.startsInSeconds / 60)} min` : `about ${Math.max(5, Math.round(line.startsInSeconds / 5) * 5)} s`;
+        status.textContent = line.ahead === 0
+          ? `You are next in line for the slicer. Starting in ${wait}.`
+          : `In line for the slicer: ${line.ahead} ${line.ahead === 1 ? 'model' : 'models'} ahead of you. Starting in ${wait}.`;
+        return;
+      }
+      const s = Math.round((Date.now() - (slice.slicingSince ?? slice.startedAt)) / 1000);
       const usesSupport = panel.value.support !== 'none';
       status.textContent = `Slicing… ${s} s.${s >= 8 && usesSupport ? ' Supports take the longest, up to a minute or two.' : ''}`;
     };
@@ -755,7 +764,11 @@ function renderAction() {
     slice.timer = setInterval(() => (status.isConnected ? tick() : clearInterval(slice.timer)), 1000);
     card.append(status);
     const cancel = el('button', { type: 'button', class: 'wide' }, 'Cancel');
-    cancel.addEventListener('click', () => sliceAbort?.abort());
+    cancel.addEventListener('click', () => {
+      // Give the place in line to the next student at once.
+      if (slice.ticket) fetch(`/api/slice/line?ticket=${slice.ticket}`, { method: 'DELETE' }).catch(() => {});
+      sliceAbort?.abort();
+    });
     card.append(cancel);
     return;
   }
@@ -830,10 +843,13 @@ async function runSlice() {
     if (!phrase) return;
   }
   sliceAbort = new AbortController();
-  slice = { state: 'slicing', startedAt: Date.now() };
+  // The ticket is this slice's place in the line for the slicer (src/line.js on the server).
+  const ticket = crypto.randomUUID();
+  slice = { state: 'slicing', startedAt: Date.now(), ticket };
   renderAction();
+  watchLine(ticket);
   try {
-    const headers = {};
+    const headers = { 'x-slice-ticket': ticket };
     if (clientId) headers['x-client-id'] = clientId;
     if (phrase) headers['x-class-phrase'] = phrase;
     const res = await fetch('/api/slice', { method: 'POST', body: form, signal: sliceAbort.signal, headers });
@@ -877,6 +893,23 @@ async function runSlice() {
   }
   sliceAbort = null;
   renderAction();
+}
+
+// While a slice runs, ask the server every 2 s where it is in the line. Asking also keeps the
+// place: a page that stops asking (tab closed) is dropped so the line moves on.
+async function watchLine(ticket) {
+  const current = () => slice.state === 'slicing' && slice.ticket === ticket;
+  while (current()) {
+    try {
+      const res = await fetch(`/api/slice/line?ticket=${ticket}`, { cache: 'no-store' });
+      const line = res.ok ? await res.json() : null;
+      if (!current()) return;
+      if (line?.state === 'none') return; // no line on this server (local dev without one)
+      if (line?.state !== 'waiting' && slice.line?.state === 'waiting') slice.slicingSince = Date.now();
+      slice.line = line;
+    } catch { /* Wi-Fi blip: try again next time */ }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
 }
 
 // Save the G-code under the name in the File name box (it may have changed since slicing). Chrome

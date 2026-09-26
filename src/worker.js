@@ -18,6 +18,7 @@ import {
   toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
 import { generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
+import { TICKET_PATTERN } from './line.js';
 
 const KV_CLASS = 'class';
 const KV_SLICING = 'slicing'; // { phrase, until } while the teacher has slicing open
@@ -150,6 +151,8 @@ async function handleTeacher(request, env, url, ctx) {
     }
     if (request.method === 'DELETE') {
       await env.CLASS_KV?.delete(KV_SLICING);
+      // Nothing more can come in: let the slicers sleep (and stop billing) now.
+      if (env.slicerStopIdle) ctx?.waitUntil?.(env.slicerStopIdle().catch(() => {}));
       return json(200, { open: false });
     }
     if (request.method !== 'PUT') return json(405, { error: 'method', message: 'Use GET, PUT or DELETE.' });
@@ -313,7 +316,7 @@ async function handleSlice(request, env) {
     const tooFast = await slicerBudget(request, env);
     if (tooFast) return tooFast;
     const meshName = safeNamePart(form.get('modelName'), 'plate', LIMITS.maxFileNameLength);
-    return sliceWithEngine(send, stlBytes, checked.settings, fileName, classConfig.maxPrintMinutes, meshName);
+    return sliceWithEngine(send, stlBytes, checked.settings, fileName, classConfig.maxPrintMinutes, meshName, request.headers.get('x-slice-ticket'));
   }
 
   return json(501, {
@@ -327,7 +330,7 @@ async function handleSlice(request, env) {
   });
 }
 
-async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinutes = 0, meshName = 'plate') {
+async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinutes = 0, meshName = 'plate', ticket = null) {
   let res;
   try {
     res = await send('/slice', {
@@ -338,8 +341,11 @@ async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinut
         'x-cura-settings': JSON.stringify(toCuraOverrides(settings)),
         'x-model-name': meshName, // written into the G-code as ";MESH:<name>.stl", like Cura
       },
-    });
-  } catch {
+    }, { ticket });
+  } catch (err) {
+    // From the line in front of the slicer (src/index.js).
+    if (err?.code === 'full') return refuse(503, 'The line for the slicer is very long right now. Wait a few minutes and try again.');
+    if (err?.code === 'left') return refuse(409, 'You left the line for the slicer. Press Slice to try again.');
     return refuse(503, 'The slicer is not answering. Try again in a minute.');
   }
   if (!res.ok) {
@@ -391,6 +397,23 @@ async function handleApi(request, env, url, ctx) {
   }
   // Everything under /api/teacher/ needs the key, even paths that do not exist.
   if (url.pathname.startsWith('/api/teacher/')) return handleTeacher(request, env, url, ctx);
+  // Your place in the line for the slicer (src/line.js). Asked every couple of seconds while a
+  // slice waits; it only reaches the line's Durable Object, never a container.
+  if (url.pathname === '/api/slice/line') {
+    const ticket = url.searchParams.get('ticket') ?? '';
+    if (!TICKET_PATTERN.test(ticket)) return json(400, { error: 'ticket', message: 'Bad ticket.' });
+    if (!env.sliceLineStatus) return json(200, { state: 'none' });
+    try {
+      if (request.method === 'DELETE') {
+        await env.sliceLineCancel(ticket);
+        return json(200, { state: 'cancelled' });
+      }
+      if (request.method !== 'GET') return json(405, { error: 'method', message: 'Use GET or DELETE.' });
+      return json(200, await env.sliceLineStatus(ticket));
+    } catch {
+      return json(200, { state: 'none' }); // the line is only a hint: the slice itself goes on
+    }
+  }
   if (url.pathname === '/api/slice') {
     if (request.method !== 'POST') return json(405, { error: 'method', message: 'Use POST.' });
     return handleSlice(request, env);

@@ -33,11 +33,14 @@ RUN curl -fsSL -o cura.AppImage "$APPIMAGE_URL" \
 FROM python:3.12-slim-bookworm
 COPY --from=appimage /out/bin /opt/curaengine
 COPY --from=appimage /out/resources /opt/cura/resources
+# OMP_NUM_THREADS=1: the container has 1 vCPU, but the engine sees the host's cores and starts a
+# thread per core, which fight over it. Benchy with tree supports: 16.0 s instead of 17.3 s, same G-code.
 ENV LD_LIBRARY_PATH=/opt/curaengine \
     CURA_ENGINE=/opt/curaengine/CuraEngine \
     CURA_RESOURCES=/opt/cura/resources \
     RES_OVERLAY= \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    OMP_NUM_THREADS=1
 # The engine must answer, or the image is broken.
 RUN /opt/curaengine/CuraEngine help 2>&1 | grep -q "Cura_SteamEngine version 4.13.2"
 WORKDIR /app

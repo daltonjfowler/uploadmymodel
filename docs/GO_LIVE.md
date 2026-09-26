@@ -1,5 +1,15 @@
 # Turning on slicing
 
+**Update 2026-09-26 afternoon: it was not sleeping.** `container/server.py` ran as PID 1 without a
+SIGTERM handler, and Linux ignores an unhandled SIGTERM for PID 1 (uploadmycode's September bill,
+same bug). Cloudflare's idle stop never landed, so a started slicer stayed awake at 3 GiB until the
+next deploy: ~11 GiB-hours on go-live day for 190 CPU-seconds of slicing. Fixed: server.py exits on
+SIGTERM (0.4 s, checked with `docker stop`). Now it sleeps 1 minute after the last slice, and at
+once when the teacher closes slicing (unless a slice is running). Also new: the line in front of
+the slicers (`src/line.js`, the `SlicerLine` Durable Object) uses both instances (`slicer-0`, and
+`slicer-1` only when 0 is busy) and tells each waiting student their true place. The cost notes
+below still hold, with "plus 2 minutes" now "plus 1 minute".
+
 **Done 2026-09-26** (Dalton's go): `slicer-live` was merged into `main` and deployed. Container app
 `uploadmymodel-slicercontainer` (a03c4da0-c29e-48ea-a202-269781865e5e), 1 vCPU / 3 GiB, max 2,
 sleeps after 2 minutes. Measured live: the sample piece 1.1 s from click to Preview, a supported

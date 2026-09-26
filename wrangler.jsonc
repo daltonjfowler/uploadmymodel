@@ -17,22 +17,32 @@
   ],
   // TEACHER_KEY is a secret: npx wrangler secret put TEACHER_KEY
   // The slicer: CuraEngine 4.13.2 in a container (container/README.md). 1 vCPU / 3 GiB is the
-  // smallest custom size (Cloudflare needs 3 GiB per vCPU): a supported Benchy in about 16 s, five
-  // times faster than basic (79 s). CPU bills only while slicing; memory while awake. Sleeps
-  // after 2 min without work, and only the teacher's open slicing window lets work in.
+  // smallest custom size (Cloudflare needs 3 GiB per vCPU; slicing itself peaks at ~300 MiB on the
+  // biggest plate): a supported Benchy in about 16 s, five times faster than basic (79 s). More
+  // vCPUs barely help (tree supports run on one core: 4 vCPU = 14 s). CPU bills only while
+  // slicing; memory while awake. Sleeps after 1 min without work (server.py must exit on SIGTERM
+  // for that), and only the teacher's open slicing window lets work in.
   "containers": [
     {
       "class_name": "SlicerContainer",
       "image": "./container/Dockerfile",
       "image_build_context": ".",
       "instance_type": { "vcpu": 1, "memory_mib": 3072, "disk_mb": 4000 },
-      "max_instances": 2
+      "max_instances": 3 // SLICERS in src/index.js (2) + 1 for the old cf-singleton-container name (see there)
     }
   ],
+  // SLICER_LINE: the line in front of the slicers (src/line.js), its own object so that students
+  // asking for their place never touch a container.
   "durable_objects": {
-    "bindings": [{ "name": "SLICER", "class_name": "SlicerContainer" }]
+    "bindings": [
+      { "name": "SLICER", "class_name": "SlicerContainer" },
+      { "name": "SLICER_LINE", "class_name": "SlicerLine" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SlicerContainer"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SlicerContainer"] },
+    { "tag": "v2", "new_sqlite_classes": ["SlicerLine"] }
+  ],
   // Fair-use fuse for the slicer (src/worker.js slicerBudget): per browser, and for everyone.
   "ratelimits": [
     { "name": "SLICE_RATE", "namespace_id": "20260926", "simple": { "limit": 6, "period": 60 } },

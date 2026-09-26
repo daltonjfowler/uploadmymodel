@@ -5,7 +5,7 @@ the school uses, checked by SHA-256 at build time), Cura's own 4.13.2 resource f
 AppImage, the resolver from `engine/`, and a small HTTP service (`server.py`). Image: about 200 MB.
 
 **Status (2026-09-26): live** on uploadmymodel.com as the Cloudflare Container
-`uploadmymodel-slicercontainer` (1 vCPU / 3 GiB, max 2, sleeps after 2 minutes; `src/index.js`,
+`uploadmymodel-slicercontainer` (1 vCPU / 3 GiB, max 2, sleeps after 1 minute or when the teacher closes slicing; `src/index.js`,
 `wrangler.jsonc`). A supported Benchy took 14.5 s live. `docs/GO_LIVE.md` has the costs and the undo
 steps. Locally, `SLICER_URL` in `.dev.vars` still points the Worker at the Docker container.
 Deploying it as a Cloudflare Container costs container time from the allowance shared with
