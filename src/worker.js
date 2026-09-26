@@ -129,6 +129,19 @@ async function teacherOk(request, env) {
 
 async function handleTeacher(request, env, url) {
   if (!(await teacherOk(request, env))) return json(401, { error: 'key', message: 'Wrong teacher key.' });
+  if (url.pathname === '/api/teacher/warmup') {
+    if (request.method !== 'POST') return json(405, { error: 'method', message: 'Use POST.' });
+    const send = slicerSender(env);
+    if (!send) return json(501, { error: 'engine_not_ready', message: 'This site has no slicer connected yet.' });
+    const t0 = Date.now();
+    try {
+      const r = await send('/health', { method: 'GET' });
+      const body = await r.json();
+      return json(r.ok ? 200 : 502, { ok: r.ok, engine: body.engine ?? null, seconds: Math.round((Date.now() - t0) / 100) / 10 });
+    } catch {
+      return json(503, { error: 'slicer', message: 'The slicer did not answer. Try again in a minute.' });
+    }
+  }
   if (url.pathname !== '/api/teacher/class') return json(404, { error: 'not_found', message: 'No such API.' });
   if (request.method === 'GET') return json(200, await readClassConfig(env));
   if (request.method !== 'PUT') return json(405, { error: 'method', message: 'Use GET or PUT.' });
@@ -181,6 +194,29 @@ export function checkPlateSTL(buf) {
   return { ok: true, triangles: count, size };
 }
 
+// How to reach the slicer: the Cloudflare Container (src/index.js puts slicerSend on env when the
+// SLICER binding exists), or SLICER_URL for local dev (container running in Docker). null = none.
+function slicerSender(env) {
+  if (env.slicerSend) return env.slicerSend;
+  if (env.SLICER_URL) return (path, init) => fetch(new URL(path, env.SLICER_URL), init);
+  return null;
+}
+
+// Bill fuse for the slicer (Cloudflare rate-limit bindings, wrangler.jsonc): per browser, then for
+// everyone. Keyed by the page's x-client-id, not the IP: a school shares one public IP. Only
+// checked for requests that passed every other check, so mistakes never spend the budget.
+async function slicerBudget(request, env) {
+  const id = request.headers.get('x-client-id') ?? '';
+  const key = /^[A-Za-z0-9-]{8,64}$/.test(id) ? `client ${id}` : `ip ${request.headers.get('cf-connecting-ip') ?? ''}`;
+  if (env.SLICE_RATE && !(await env.SLICE_RATE.limit({ key })).success) {
+    return refuse(429, 'You are slicing very fast. Wait a minute and try again.');
+  }
+  if (env.SLICE_RATE_ALL && !(await env.SLICE_RATE_ALL.limit({ key: 'everyone' })).success) {
+    return refuse(429, 'The slicer is very busy right now. Wait a minute and try again.');
+  }
+  return null;
+}
+
 async function handleSlice(request, env) {
   // Browsers always send the length for a form upload; without it the whole body would be read
   // before any size check.
@@ -221,11 +257,13 @@ async function handleSlice(request, env) {
   const what = safeNamePart(form.get('modelName'), 'model');
   const fileName = `${who ? `${who}-` : ''}${what}`.slice(0, 40).replace(/-$/, '') + '.gcode';
 
-  // The slicer (container/): only when SLICER_URL is set, which for now is local dev only
-  // (.dev.vars, with the container running in Docker). Still to decide before it goes live:
-  // Cloudflare Container sizing and cost, teacher limits on print time, and a header comment /
-  // M117 with the student's name.
-  if (env.SLICER_URL) return sliceWithEngine(env.SLICER_URL, stlBytes, checked.settings, fileName, classConfig.maxPrintMinutes);
+  // The slicer (container/), if this deployment has one (see slicerSender).
+  const send = slicerSender(env);
+  if (send) {
+    const tooFast = await slicerBudget(request, env);
+    if (tooFast) return tooFast;
+    return sliceWithEngine(send, stlBytes, checked.settings, fileName, classConfig.maxPrintMinutes);
+  }
 
   return json(501, {
     error: 'engine_not_ready',
@@ -238,10 +276,10 @@ async function handleSlice(request, env) {
   });
 }
 
-async function sliceWithEngine(base, stlBytes, settings, fileName, maxPrintMinutes = 0) {
+async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinutes = 0) {
   let res;
   try {
-    res = await fetch(new URL('/slice', base), {
+    res = await send('/slice', {
       method: 'POST',
       body: stlBytes,
       headers: { 'content-type': 'model/stl', 'x-cura-settings': JSON.stringify(toCuraOverrides(settings)) },
@@ -278,7 +316,7 @@ async function sliceWithEngine(base, stlBytes, settings, fileName, maxPrintMinut
 }
 
 async function handleApi(request, env, url) {
-  if (url.pathname === '/api/health') return json(200, { ok: true, engine: false });
+  if (url.pathname === '/api/health') return json(200, { ok: true, engine: !!slicerSender(env) });
   if (url.pathname === '/api/class') {
     if (request.method !== 'GET') return json(405, { error: 'method', message: 'Use GET.' });
     return json(200, await readClassConfig(env));

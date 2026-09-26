@@ -152,6 +152,7 @@ $('#load').addEventListener('click', async () => {
     rememberKey();
     renderRows();
     $('#setup').hidden = false;
+    $('#warmCard').hidden = false;
     say('Class setup loaded.', 'ok');
   } catch (e) {
     say(e.message, 'error');
@@ -177,6 +178,17 @@ $('#save').addEventListener('click', async () => {
     say(locked.length ? `Saved. Locked for students: ${locked.join(', ')}.` : 'Saved. Students can change every setting.', 'ok');
   } catch (e) {
     say(e.message, 'error');
+  }
+});
+
+$('#warmup').addEventListener('click', async () => {
+  $('#warmStatus').textContent = 'Waking the slicer…';
+  try {
+    const r = await fetch('/api/teacher/warmup', { method: 'POST', headers: { 'x-teacher-key': keyInput.value.trim() } });
+    const j = await r.json().catch(() => ({}));
+    $('#warmStatus').textContent = r.ok ? `Ready (${j.engine ?? 'slicer'}, answered in ${j.seconds} s).` : (j.message ?? `Not ready (${r.status}).`);
+  } catch {
+    $('#warmStatus').textContent = 'Could not reach the server.';
   }
 });
 

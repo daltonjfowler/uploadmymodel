@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "uploadmymodel",
-  "main": "src/worker.js",
+  "main": "src/index.js",
   "compatibility_date": "2026-08-31",
   // uploadmymodel.com is the real address; www redirects to it (src/worker.js). The
   // workers.dev URL stays on as a fallback.
@@ -16,6 +16,26 @@
     { "binding": "CLASS_KV", "id": "348e4cd89f9a4f5da842763149d5d96d" }
   ],
   // TEACHER_KEY is a secret: npx wrangler secret put TEACHER_KEY
+  // The slicer: CuraEngine 4.13.2 in a container (container/README.md). basic = 1/4 vCPU, 1 GiB:
+  // a supported Benchy takes about 80 s there (measured with Docker limits). Sleeps after 5 min.
+  "containers": [
+    {
+      "class_name": "SlicerContainer",
+      "image": "./container/Dockerfile",
+      "image_build_context": ".",
+      "instance_type": "basic",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "SLICER", "class_name": "SlicerContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SlicerContainer"] }],
+  // Fair-use fuse for the slicer (src/worker.js slicerBudget): per browser, and for everyone.
+  "ratelimits": [
+    { "name": "SLICE_RATE", "namespace_id": "20260926", "simple": { "limit": 6, "period": 60 } },
+    { "name": "SLICE_RATE_ALL", "namespace_id": "20260927", "simple": { "limit": 60, "period": 60 } }
+  ],
   // public/ is built from web/ by `npm run build` (npm run deploy does it first).
   "assets": {
     "directory": "./public/",
