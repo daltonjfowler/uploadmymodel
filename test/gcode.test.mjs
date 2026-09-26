@@ -41,3 +41,17 @@ test('every line type the school file uses is found; printed lines stay inside t
   assert.ok(Math.abs(minX - 104.051) < 0.01 && Math.abs(maxX - 174.79) < 0.01, `${minX} ${maxX}`);
   assert.ok(Math.abs(minY - 112.938) < 0.01 && Math.abs(maxY - 166.598) < 0.01, `${minY} ${maxY}`);
 });
+
+test('raft layers (negative ;LAYER: numbers) count as skirt/brim/raft, not supports', () => {
+  const g = parseGcode([
+    ';LAYER_COUNT:2', 'M82', 'G92 E0',
+    ';LAYER:-1', ';TYPE:SUPPORT', 'G1 X0 Y0 Z0.3 F1000', 'G1 X10 Y0 E1',
+    ';LAYER:0', ';TYPE:WALL-OUTER', 'G1 X0 Y0 Z0.6', 'G1 X10 Y0 E2',
+    ';TYPE:SUPPORT', 'G1 X10 Y10 E3',
+  ].join('\n'));
+  const count = (id) => g.types[LINE_TYPES.findIndex((t) => t.id === id)].segments.length / 6;
+  assert.equal(g.layers.length, 2);
+  assert.equal(count('SKIRT'), 1); // the raft line
+  assert.equal(count('SUPPORT'), 1); // the real support line on layer 0
+  assert.equal(count('WALL-OUTER'), 1);
+});

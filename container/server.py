@@ -41,7 +41,7 @@ CHOICES = {
     "infill_pattern": {"grid", "lines", "triangles", "trihexagon", "cubic", "gyroid", "lightning"},
     "support_structure": {"tree"},
     "support_type": {"buildplate", "everywhere"},
-    "adhesion_type": {"skirt", "brim"},
+    "adhesion_type": {"skirt", "brim", "raft", "none"},
 }
 NUMBERS = {
     "wall_line_count": (2, 4, 1),

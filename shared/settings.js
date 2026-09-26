@@ -88,7 +88,12 @@ export const SUPPORT_CHOICES = [
 export const ADHESION_CHOICES = [
   { id: 'skirt', label: 'Skirt', blurb: 'A line drawn around your model to get the plastic flowing. The class default.' },
   { id: 'brim', label: 'Brim', blurb: 'A flat rim stuck to the edge of your model, like a hat brim. Helps tall or tiny parts stay down. Peel it off after.' },
+  { id: 'raft', label: 'Raft', blurb: 'A thick plastic mat printed under your whole model. Grips best for warped or wobbly bottoms, but uses more plastic and leaves a rougher underside. Peel it off after.' },
+  { id: 'none', label: 'None', blurb: 'Nothing extra. The printer starts straight on your model, so the first line may be thin. Only for quick tests.' },
 ];
+
+// Recommended shows these two as buttons; Custom has all four.
+export const SIMPLE_ADHESION = ['skirt', 'brim'];
 
 export const WALL_CHOICES = [
   { id: 2, label: '2 walls (1.0 mm)', blurb: 'The class default.' },
@@ -248,7 +253,8 @@ export function summarize(settings) {
   let support = s.support === 'none' ? 'No support' : 'Tree support';
   if (s.support === 'everywhere') support += ' everywhere';
   if (s.support !== 'none' && s.supportAngle !== CLASS_DEFAULTS.supportAngle) support += ` ${s.supportAngle}°`;
-  return `${q.layerMm.toFixed(2)} mm · ${s.infillDensity}% · ${support} · ${byId(ADHESION_CHOICES, s.adhesion).label}`;
+  const adhesion = s.adhesion === 'none' ? 'No skirt' : byId(ADHESION_CHOICES, s.adhesion).label;
+  return `${q.layerMm.toFixed(2)} mm · ${s.infillDensity}% · ${support} · ${adhesion}`;
 }
 
 export function isClassDefault(settings, defaults = CLASS_DEFAULTS) {

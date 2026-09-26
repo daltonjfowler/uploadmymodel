@@ -32,7 +32,7 @@ test('missing keys take the class default; unknown keys are dropped', () => {
 test('values off the lists are refused, never fixed up', () => {
   for (const bad of [
     { infillDensity: 22 }, { infillDensity: 105 }, { infillDensity: -5 }, { infillDensity: '20' }, { infillDensity: 20.5 },
-    { quality: 'ultra' }, { infillPattern: 'honeycomb' }, { support: 'normal' }, { adhesion: 'raft' }, { walls: 10 }, { walls: '2' },
+    { quality: 'ultra' }, { infillPattern: 'honeycomb' }, { support: 'normal' }, { adhesion: 'glue' }, { walls: 10 }, { walls: '2' },
     { supportAngle: 35 }, { supportAngle: 85 }, { supportAngle: 62 }, { supportAngle: '60' },
   ]) {
     assert.equal(validateSettings(bad).ok, false, JSON.stringify(bad));
@@ -91,6 +91,16 @@ test('class phrases: forgiving to type, strict to check', () => {
   for (const bad of [{ minutes: 51, phrase: 'blue-robot' }, { minutes: 50, phrase: 'ab' }, { minutes: 50, phrase: 'x'.repeat(41) }, null]) {
     assert.equal(validateOpenRequest(bad).ok, false, JSON.stringify(bad));
   }
+});
+
+test('adhesion: skirt, brim, raft, none; summary reads well', () => {
+  for (const a of ['skirt', 'brim', 'raft', 'none']) {
+    assert.equal(validateSettings({ adhesion: a }).ok, true, a);
+    assert.equal(toCuraOverrides({ adhesion: a }).adhesion_type, a);
+  }
+  assert.equal(validateSettings({ adhesion: 'glue' }).ok, false);
+  assert.match(summarize({ adhesion: 'raft' }), / · Raft$/);
+  assert.match(summarize({ adhesion: 'none' }), / · No skirt$/);
 });
 
 test('safe file names', () => {

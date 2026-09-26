@@ -10,7 +10,7 @@ export const LINE_TYPES = [
   { id: 'SKIN', label: 'Top / bottom', color: '#f5c518' },
   { id: 'FILL', label: 'Infill', color: '#f08c2e' },
   { id: 'SUPPORT', label: 'Supports', color: '#3fb9e0' },
-  { id: 'SKIRT', label: 'Skirt / brim', color: '#a78bfa' },
+  { id: 'SKIRT', label: 'Skirt / brim / raft', color: '#a78bfa' },
   { id: 'other', label: 'Other', color: '#9aa4af' },
 ];
 
@@ -62,6 +62,7 @@ export function parseGcode(text) {
   let absXYZ = true, absE = true;
   let type = -1; // -1 = not in a printed section
   let inLayer = false;
+  let inRaft = false;
   const info = { timeS: null, filamentM: null, filamentG: null, layerHeight: null, flavor: null };
 
   let pos = 0;
@@ -76,10 +77,13 @@ export function parseGcode(text) {
     if (line.charCodeAt(0) === 59) { // ';' comment line
       if (line.startsWith(';LAYER:')) {
         inLayer = true;
+        // Raft layers come first with negative numbers; CuraEngine tags their lines SUPPORT, but
+        // they belong with the skirt and brim, not the supports.
+        inRaft = Number(line.slice(7)) < 0;
         layers.push(NaN); // set by the layer's first printed line
         for (let t = 0; t < grows.length; t++) starts[t].push(grows[t].n);
       } else if (line.startsWith(';TYPE:')) {
-        type = typeIndex(line.slice(6).trim());
+        type = inRaft ? TYPE_INDEX.get('SKIRT') : typeIndex(line.slice(6).trim());
       } else if (line.startsWith(';TIME_ELAPSED:')) {
         type = -1; // end of a layer; the next layer names its type again
       } else if (line.startsWith(';TIME:')) {

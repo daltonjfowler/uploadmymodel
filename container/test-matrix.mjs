@@ -19,7 +19,7 @@ const cases = [
   ...INFILL_PATTERNS.map((p) => ({ infillPattern: p.id, infillDensity: 25 })),
   { infillDensity: 0 }, { infillDensity: 100 }, { walls: 4 }, { walls: 3 },
   { support: 'none' }, { support: 'everywhere' }, { supportAngle: 40 }, { supportAngle: 80 },
-  { adhesion: 'brim' }, { quality: 'high_speed', adhesion: 'brim', support: 'everywhere', infillPattern: 'gyroid', walls: 4 },
+  { adhesion: 'brim' }, { adhesion: 'raft' }, { adhesion: 'none' }, { adhesion: 'raft', support: 'none', quality: 'standard' }, { quality: 'high_speed', adhesion: 'brim', support: 'everywhere', infillPattern: 'gyroid', walls: 4 },
 ];
 let bad = 0;
 for (const c of cases) {
@@ -33,7 +33,9 @@ for (const c of cases) {
   const types = ['WALL-OUTER', 'WALL-INNER', 'SKIN', 'FILL', 'SUPPORT', 'SKIRT'].map((_, i) => g.types[i].segments.length / 6);
   const problems = [];
   if (Math.abs(g.layerHeight - lh) > 1e-6) problems.push(`layer height ${g.layerHeight}`);
-  if (s.support === 'none' && types[4] > 0) problems.push('support printed with supports off');
+  // (CuraEngine tags raft layers as SUPPORT lines, so only check without a raft.)
+  if (s.support === 'none' && s.adhesion !== 'raft' && types[4] > 0) problems.push('support printed with supports off');
+  if (s.adhesion === 'raft' && !/^;LAYER:-\d/m.test(text)) problems.push('no raft layers');
   if (s.support !== 'none' && types[4] === 0) problems.push('no support printed');
   if (s.infillDensity === 0 && types[3] > 0) problems.push('infill at 0%');
   if (s.infillDensity > 0 && s.infillDensity < 100 && types[3] === 0) problems.push('no infill');

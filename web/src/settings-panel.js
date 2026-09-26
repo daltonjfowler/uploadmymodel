@@ -3,7 +3,7 @@
 // teacher's locked settings greyed out). Both tabs edit the same settings object.
 
 import {
-  ADHESION_CHOICES, DEFAULT_CLASS_CONFIG, INFILL_PATTERNS, QUALITIES, SECTIONS, SETTINGS, lockedRows,
+  ADHESION_CHOICES, DEFAULT_CLASS_CONFIG, INFILL_PATTERNS, QUALITIES, SECTIONS, SETTINGS, SIMPLE_ADHESION, lockedRows,
   SUPPORT_CHOICES, TREE_SUPPORT_INFILL, applyClassLocks, isClassDefault, qualityById, summarize,
   validateClassConfig, validateSettings,
 } from '../../shared/settings.js';
@@ -241,10 +241,13 @@ export class SettingsPanel extends EventTarget {
     const advice = this.supportAdvice();
     if (advice) support.append(advice);
 
-    // Adhesion.
+    // Adhesion: Skirt | Brim (Raft and None live in Custom; if one is picked there, it shows here too).
     const adhesion = this.block(body, 'Adhesion', defOf('adhesion'));
-    adhesion.append(this.isLocked('adhesion') ? this.lockedLine('adhesion') : this.toggle('Brim', s.adhesion === 'brim',
-      (on) => this.set('adhesion', on ? 'brim' : 'skirt'), ADHESION_CHOICES.find((a) => a.id === 'brim').blurb));
+    if (this.isLocked('adhesion')) adhesion.append(this.lockedLine('adhesion'));
+    else {
+      adhesion.append(this.adhesionPicker(SIMPLE_ADHESION.includes(s.adhesion) ? SIMPLE_ADHESION : [...SIMPLE_ADHESION, s.adhesion]));
+      adhesion.append(el('p', { class: 'note' }, ADHESION_CHOICES.find((a) => a.id === s.adhesion)?.blurb ?? ''));
+    }
   }
 
   renderCustom(body) {
@@ -325,6 +328,19 @@ export class SettingsPanel extends EventTarget {
     return this.toggle(label, s.support !== 'none', (on) => {
       this.set('support', on ? (this.lastPlacement ?? 'buildplate') : 'none');
     }, label ? 'Hollow tree branches hold up parts that hang in the air.' : ariaLabel);
+  }
+
+  adhesionPicker(ids) {
+    const seg = el('div', { class: 'seg adhesion', role: 'radiogroup', 'aria-label': 'Build plate adhesion' });
+    for (const id of ids) {
+      const opt = ADHESION_CHOICES.find((a) => a.id === id);
+      const on = this.settings.adhesion === id;
+      const b = el('button', { type: 'button', role: 'radio', 'aria-checked': String(on), class: on ? 'on' : '' }, opt.label);
+      b.addEventListener('click', () => this.set('adhesion', id));
+      this.hintOn(b, opt.label, opt.blurb);
+      seg.append(b);
+    }
+    return seg;
   }
 
   placementPicker() {

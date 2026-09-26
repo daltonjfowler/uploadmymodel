@@ -19,7 +19,7 @@ check('stage is preview', await page.evaluate(() => document.body.dataset.stage)
 check('settings hidden', await page.$eval('#settings', (e) => e.hidden), true);
 check('stats', await page.$$eval('.stats dd', (d) => d.map((x) => x.textContent)), ["3 h 10 min (Cura's guess)", '2.76 m · about 21 g', '266 · 0.18 mm each']);
 check('top layer label', await page.$eval('#layerLabel', (e) => e.textContent), 'Layer 266 of 266 · 48.05 mm');
-check('legend items', await page.$$eval('.legend-item', (x) => x.map((e) => e.textContent)), ['Outer wall', 'Inner walls', 'Top / bottom', 'Infill', 'Supports', 'Skirt / brim']);
+check('legend items', await page.$$eval('.legend-item', (x) => x.map((e) => e.textContent)), ['Outer wall', 'Inner walls', 'Top / bottom', 'Infill', 'Supports', 'Skirt / brim / raft']);
 check('models hidden', await page.evaluate(() => window.umm.viewer.models.every((m) => !m.mesh.visible)), true);
 check('tools hidden', await page.$eval('.tools', (e) => getComputedStyle(e).display), 'none');
 await page.screenshot({ path: OUT + '17-preview-top.png' });

@@ -34,7 +34,7 @@ The **class settings** work for most prints. Change something only if you know w
 | Print quality | Thin layers look smooth but take longer | **Fast** for rough test parts |
 | Infill | How full the inside is | More (30-50%) for parts that get pushed on |
 | Tree supports | Branches that hold up red parts | Turn off if nothing is red |
-| Brim | A flat rim that helps the part stick | Tall, thin or tiny parts |
+| Adhesion | Skirt (a line around it, the default) or Brim (a flat rim that helps it stick) | Brim for tall, thin or tiny parts. Custom also has Raft (a mat under the whole part) |
 
 Settings with a 🔒 are set by your teacher.
 
