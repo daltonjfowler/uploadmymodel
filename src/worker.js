@@ -14,7 +14,7 @@
 // TEACHER_KEY secret (npx wrangler secret put TEACHER_KEY). No secret set = no teacher access.
 
 import {
-  DEFAULT_CLASS_CONFIG, LIMITS, PRINTER, checkAgainstClass, formatMinutes, gcodeFileName, summarize,
+  DEFAULT_CLASS_CONFIG, LIMITS, PRINTER, checkAgainstClass, formatMinutes, gcodeFileName, safeNamePart, summarize,
   toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
 import { generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
@@ -311,7 +311,8 @@ async function handleSlice(request, env) {
   if (send) {
     const tooFast = await slicerBudget(request, env);
     if (tooFast) return tooFast;
-    return sliceWithEngine(send, stlBytes, checked.settings, fileName, classConfig.maxPrintMinutes);
+    const meshName = safeNamePart(form.get('modelName'), 'plate', LIMITS.maxFileNameLength);
+    return sliceWithEngine(send, stlBytes, checked.settings, fileName, classConfig.maxPrintMinutes, meshName);
   }
 
   return json(501, {
@@ -325,13 +326,17 @@ async function handleSlice(request, env) {
   });
 }
 
-async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinutes = 0) {
+async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinutes = 0, meshName = 'plate') {
   let res;
   try {
     res = await send('/slice', {
       method: 'POST',
       body: stlBytes,
-      headers: { 'content-type': 'model/stl', 'x-cura-settings': JSON.stringify(toCuraOverrides(settings)) },
+      headers: {
+        'content-type': 'model/stl',
+        'x-cura-settings': JSON.stringify(toCuraOverrides(settings)),
+        'x-model-name': meshName, // written into the G-code as ";MESH:<name>.stl", like Cura
+      },
     });
   } catch {
     return refuse(503, 'The slicer is not answering. Try again in a minute.');

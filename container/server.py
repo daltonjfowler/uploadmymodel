@@ -102,29 +102,54 @@ def centred_stl(data):
     if count == 0 or count > MAX_TRIANGLES or 84 + count * 50 != len(data):
         raise Refused(400, "model is not a valid binary STL of an allowed size")
     out = bytearray(data)
-    for t in range(count):
-        base = 84 + t * 50 + 12
-        for v in range(3):
-            off = base + v * 12
-            x, y = struct.unpack_from("<ff", out, off)
-            struct.pack_into("<ff", out, off, x - BED_X / 2, y - BED_Y / 2)
+    tri = struct.Struct("<12fH")  # normal, 3 corners, attribute: one 50-byte record
+    hx, hy = BED_X / 2, BED_Y / 2
+    for i, r in enumerate(tri.iter_unpack(memoryview(data)[84:])):
+        tri.pack_into(out, 84 + i * 50, r[0], r[1], r[2],
+                      r[3] - hx, r[4] - hy, r[5], r[6] - hx, r[7] - hy, r[8], r[9] - hx, r[10] - hy, r[11], r[12])
     return bytes(out)
 
 
-def slice_plate(stl, quality, user):
-    r = resolve.resolve(quality, gl_user=user, ex_user=user)
+# The setting work (resolve.resolve) depends only on the settings, and a class mostly uses the same
+# few combinations, so keep the answers. slice_file() copies what it changes, so reuse is safe.
+_resolved = {}
+
+
+def resolved(quality, user):
+    key = (quality, tuple(sorted(user.items())))
+    r = _resolved.get(key)
+    if r is None:
+        r = resolve.resolve(quality, gl_user=user, ex_user=user)
+        if len(_resolved) > 64:
+            _resolved.clear()
+        _resolved[key] = r
+    return r
+
+
+def mesh_file_name(name):
+    # The student's model name as a plain file name (the Worker already cleaned it; check again).
+    clean = re.sub(r"[^a-z0-9-]+", "-", str(name or "").lower()).strip("-")[:30]
+    return f"{clean or 'plate'}.stl"
+
+
+def slice_plate(stl, quality, user, timings, model_name=None):
+    t = time.time()
+    r = resolved(quality, user)
+    timings["resolve"] = time.time() - t
     overrides = {"material_bed_temp_prepend": "False", "material_print_temp_prepend": "False"}
     with tempfile.TemporaryDirectory() as tmp:
-        model = os.path.join(tmp, "plate.stl")
+        model = os.path.join(tmp, mesh_file_name(model_name))
         out = os.path.join(tmp, "plate.gcode")
         with open(model, "wb") as f:
             f.write(stl)
         last = None
         for attempt in range(1, ATTEMPTS + 1):
+            t = time.time()
             try:
                 res = run.slice_file(r, model, out, overrides, workdir=os.path.join(tmp, "flat"), timeout=TIMEOUT_S)
             except subprocess.TimeoutExpired:
                 raise Refused(500, "slicing took too long")
+            timings["engine"] = timings.get("engine", 0) + time.time() - t
             if res["exit"] == 0:
                 with open(out, "rb") as f:
                     gcode = f.read()
@@ -166,10 +191,13 @@ class Handler(BaseHTTPRequestHandler):
             if length > MAX_BODY:
                 raise Refused(413, "model too big")
             quality, user = check_settings(self.headers.get("x-cura-settings"))
-            stl = centred_stl(self.rfile.read(length))
             t0 = time.time()
+            timings = {}
+            stl = centred_stl(self.rfile.read(length))
+            timings["model"] = time.time() - t0
             with lock:
-                gcode, res, attempts = slice_plate(stl, quality, user)
+                timings["queue"] = time.time() - t0 - timings["model"]
+                gcode, res, attempts = slice_plate(stl, quality, user, timings, self.headers.get("x-model-name"))
             header = res["header"] or ""
             time_s = re.search(r";TIME:(\d+)", header)
             metres = re.search(r";Filament used: ([0-9.]+)m", header)
@@ -183,6 +211,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("x-layers", str(layers))
             self.send_header("x-engine-seconds", f"{time.time() - t0:.1f}")
             self.send_header("x-attempts", str(attempts))
+            self.send_header("x-timings", ";".join(f"{k}={v:.2f}" for k, v in timings.items()))
             self.end_headers()
             self.wfile.write(gcode)
         except (BrokenPipeError, ConnectionResetError):
@@ -198,6 +227,35 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
 
+# The class settings as the Worker sends them (toCuraOverrides(CLASS_DEFAULTS)).
+CLASS_DEFAULT_SETTINGS = {
+    "quality_type": "high detail", "wall_line_count": 2, "infill_sparse_density": 20, "infill_pattern": "grid",
+    "support_enable": True, "support_structure": "tree", "support_type": "buildplate", "support_infill_rate": 0,
+    "support_angle": 60, "adhesion_type": "skirt",
+}
+
+
+def warm_up():
+    # When the container wakes: work out the class settings and slice a 10 mm cube once, so the
+    # first student gets cached settings and a warm engine.
+    try:
+        t = time.time()
+        quality, user = check_settings(json.dumps(CLASS_DEFAULT_SETTINGS))
+        v = [(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0), (0, 0, 10), (10, 0, 10), (10, 10, 10), (0, 10, 10)]
+        faces = [(0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4), (2, 3, 7), (2, 7, 6), (1, 2, 6), (1, 6, 5), (3, 0, 4), (3, 4, 7)]
+        stl = bytearray(84 + len(faces) * 50)
+        struct.pack_into("<I", stl, 80, len(faces))
+        for i, f in enumerate(faces):
+            corners = [c for k in f for c in (v[k][0] + BED_X / 2, v[k][1] + BED_Y / 2, v[k][2])]
+            struct.pack_into("<12fH", stl, 84 + i * 50, 0, 0, 0, *corners, 0)
+        with lock:
+            slice_plate(centred_stl(bytes(stl)), quality, user, {})
+        print(json.dumps({"message": "warm", "seconds": round(time.time() - t, 2)}), flush=True)
+    except Exception as e:  # warming is a nicety; never stop the service for it
+        print(json.dumps({"message": "warm-up failed", "error": repr(e)}), flush=True)
+
+
 if __name__ == "__main__":
     print(json.dumps({"message": "slicer listening", "port": PORT, "engine": ENGINE_VERSION}), flush=True)
+    threading.Thread(target=warm_up, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

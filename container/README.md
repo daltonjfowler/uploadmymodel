@@ -64,9 +64,15 @@ now and then, see `docs/ENGINE_OPTIONS.md`).
 
   | Docker limit | Sample piece | Benchy, tree supports | Benchy, no supports |
   |---|---|---|---|
-  | 1/4 CPU, 1 GiB (like `basic`) | 5.7 s | 81 s | 18 s |
+  | 1/4 CPU, 1 GiB (like `basic`) | 5.7 s | 79 s | 18 s |
   | 1/2 CPU | 2.6 s | 33 s | 7.5 s |
+  | **1 CPU, 3 GiB (the planned custom size)** | **1.4 s** | **15.6 s** | |
+  | 2 CPU | 1.0 s | 13.3 s | |
   | no limit (12-core desktop) | 0.8 s | 12 s | about 2 s |
+
+  Tree supports run on one core, so more than 1 CPU barely helps. Almost all the time is the
+  engine: the setting work is cached (one resolve per settings combination) and a new container
+  pre-warms itself with the class settings.
 
   Memory stayed far under 1 GiB. Tree supports are most of the time. With `basic`, a class of
   students slicing supported models one at a time would queue (one slice at a time per
