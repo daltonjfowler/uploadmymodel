@@ -618,11 +618,19 @@ async function runSlice() {
   form.append('name', studentName());
   form.append('modelName', viewer.models[0].name);
   form.append('fileName', customFileName);
+  // A random id for this browser, only for the slicer's fair-use limit (a school shares one IP).
+  let clientId = '';
+  try {
+    clientId = localStorage.getItem('umm.client') ?? '';
+    if (!clientId) localStorage.setItem('umm.client', (clientId = crypto.randomUUID()));
+  } catch { /* no storage: the server falls back to the IP */ }
   sliceAbort = new AbortController();
   slice = { state: 'slicing', startedAt: Date.now() };
   renderAction();
   try {
-    const res = await fetch('/api/slice', { method: 'POST', body: form, signal: sliceAbort.signal });
+    const res = await fetch('/api/slice', {
+      method: 'POST', body: form, signal: sliceAbort.signal, headers: clientId ? { 'x-client-id': clientId } : {},
+    });
     const type = res.headers.get('content-type') ?? '';
     if (res.ok && !type.includes('json')) {
       // The real thing (Phase 1): G-code comes straight back.

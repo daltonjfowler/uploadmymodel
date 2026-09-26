@@ -70,12 +70,18 @@
 
     <p id="status" class="status" role="status" aria-live="polite"></p>
 
+    <section id="warmCard" class="card page-card" hidden>
+      <h2>Slicer</h2>
+      <p class="note">The slicer sleeps after 5 minutes without work and takes a few seconds to wake up.
+        Warm it up before class so the first student does not wait.</p>
+      <div class="setup-actions"><button id="warmup" type="button">Warm up the slicer</button><span id="warmStatus" class="note"></span></div>
+    </section>
+
     <section class="card page-card">
       <h2>Coming next</h2>
       <ul class="plain">
         <li>Class phrase, so only your students can slice (like uploadmycode and uploadmylaser).</li>
-        <li>More limits: largest size, copies per student.</li>
-        <li>Warm-up button for the slicer.</li>
+        <li>Size and copy limits.</li>
       </ul>
     </section>
   </main>

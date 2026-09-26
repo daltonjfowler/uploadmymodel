@@ -111,6 +111,31 @@ test("locked settings are refused before the slicer is ever asked", async () => 
   assert.equal(calls.length, 0);
 });
 
+test('fair-use limits: per browser first, then for everyone', async () => {
+  fakeSlicer();
+  const seen = [];
+  const limiter = (ok) => ({ limit: async ({ key }) => { seen.push(key); return { success: ok }; } });
+  let e = { ...env(), SLICE_RATE: limiter(false), SLICE_RATE_ALL: limiter(true) };
+  let req = await sliceRequest();
+  req.headers.set('x-client-id', 'abcdef12-3456');
+  let res = await worker.fetch(req, e);
+  assert.equal(res.status, 429);
+  assert.match((await res.json()).message, /slicing very fast/);
+  assert.deepEqual(seen, ['client abcdef12-3456']);
+  e = { ...env(), SLICE_RATE: limiter(true), SLICE_RATE_ALL: limiter(false) };
+  res = await worker.fetch(await sliceRequest(), e);
+  assert.equal(res.status, 429);
+  assert.match((await res.json()).message, /very busy/);
+});
+
+test('the container path (slicerSend) is used when present', async () => {
+  const calls = [];
+  const e = { ...env({ slicer: null }), slicerSend: async (path, init) => { calls.push(path); return new Response('G1', { headers: { 'x-print-time-s': '60' } }); } };
+  const res = await worker.fetch(await sliceRequest(), e);
+  assert.equal(res.status, 200);
+  assert.deepEqual(calls, ['/slice']);
+});
+
 test('without SLICER_URL the answer is still 501 (the live site today)', async () => {
   const calls = fakeSlicer();
   const res = await worker.fetch(await sliceRequest(), env({ slicer: null }));
