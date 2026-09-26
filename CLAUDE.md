@@ -18,6 +18,8 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   - `teacher/index.html` + `src/teacher.js`: the teacher page (key, which settings are locked,
     class defaults, a note to students). No three.js on this page.
   - `src/loaders.js`: STL / OBJ / 3MF → triangle soup, and the sample model.
+  - `src/plate-store.js`: keeps the plate in IndexedDB so a reloaded tab gets it back.
+  - `src/mesh-health.js`: open / over-shared edge check ("holes" flag), run once per model in idle.
   - `src/gcode.js`: reads Cura G-code (`;LAYER:`, `;TYPE:`) into printed lines per type and layer
     for the Preview tab. Tested against the school Benchy (`test/gcode.test.mjs`). Opening a
     `.gcode` file previews it; a real slice result will preview the same way.
@@ -48,7 +50,10 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   Our output must match the school version's start/end G-code byte for byte.
 - Students must never be able to set temperatures, speeds, retraction, or start/end G-code. New
   student settings go in `shared/settings.js` only, as a list or a stepped range, with a test.
-- Tree supports are always 0% support infill (Dalton's rule). Not a student setting.
+- Tree supports are always 0% support infill (Dalton's rule). Not a student setting. NOTE: school's
+  4.13.2 engine makes 0% branches hollow (about half of school's 15% support plastic); decision and
+  a test print pending, see container/README.md.
+- Locked-row temperatures follow the layer height's 4.13.2 quality file (`lockedRows()`).
 - Every plate change goes through a `Viewer` method that calls `record()` (or `transaction()` for
   several steps), so Undo works. Never move, scale or turn a model's mesh directly from `main.js`.
 - Overhang red uses the student's support overhang angle (`supportAngle`, class default 60°, LulzBot's
