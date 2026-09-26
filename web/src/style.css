@@ -324,11 +324,12 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 /* ---- Overlays ---- */
 .toasts { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 10; display: grid; gap: 6px; width: min(520px, calc(100% - 32px)); }
 .toast {
-  display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 13px; border-radius: 9px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 9px 10px 9px 13px; border-radius: 9px;
   background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--blue); box-shadow: var(--shadow);
   font-size: .9rem; animation: pop .18s ease-out;
 }
-.toast > span { flex: 1; }
+.toast > span { flex: 1 1 200px; }
+.toast.many > span { flex-basis: 100%; }
 .toast.error { border-left-color: var(--bad); }
 .toast.warn { border-left-color: var(--warn); }
 .toast-action { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 650; white-space: nowrap; }

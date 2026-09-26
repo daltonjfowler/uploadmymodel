@@ -86,16 +86,20 @@ onThemeChange(() => viewer.setTheme(isDark() ? 'dark' : 'light'));
 // ---- Toasts -----------------------------------------------------------------------------------
 
 // `key`: a new toast with the same key replaces the old one (so ten quick Undos show one toast).
-function toast(message, { kind = 'info', action, actionLabel, timeout = 6000, key } = {}) {
+// One button: `action` + `actionLabel`. Several: `actions: [{ label, run }]`.
+function toast(message, { kind = 'info', action, actionLabel, actions = [], timeout = 6000, key } = {}) {
   const box = $('#toasts');
   if (key) box.querySelector(`[data-key="${key}"]`)?.remove();
   while (box.children.length >= 3) box.firstElementChild.remove();
-  const t = el('div', { class: `toast ${kind}`, role: kind === 'error' ? 'alert' : 'status', 'data-key': key });
+  if (action) actions = [{ label: actionLabel, run: action }, ...actions];
+  // Several buttons go on their own row under the message.
+  const cls = `toast ${kind}${actions.length > 1 ? ' many' : ''}`;
+  const t = el('div', { class: cls, role: kind === 'error' ? 'alert' : 'status', 'data-key': key });
   t.append(el('span', {}, message));
-  if (action) {
-    const b = el('button', { type: 'button', class: 'toast-action' }, actionLabel);
+  for (const a of actions) {
+    const b = el('button', { type: 'button', class: 'toast-action' }, a.label);
     b.addEventListener('click', () => {
-      action();
+      a.run();
       t.remove();
     });
     t.append(b);
@@ -210,20 +214,23 @@ function checkHealth(model, { quiet = false } = {}) {
   }, { timeout: 3000 });
 }
 
-// A model made in inches shows up 25.4 times too small; one made in the wrong units can also be
-// huge. Offer the fix instead of guessing.
+// A model made in inches shows up 25.4 times too small, and one from Blender (meters) 1000 times
+// too small; one made in the wrong units can also be huge. Offer the fix instead of guessing.
 function checkUnits(model) {
   const s = model.size;
   const biggest = Math.max(s.x, s.y, s.z);
   if (biggest < 8) {
-    toast(`"${model.name}" is tiny (${fmt(biggest, 1)} mm). Was it made in inches?`, {
-      action: () => viewer.models.includes(model) && viewer.transaction('inches to mm', () => {
-        viewer.setScale(model, 2540, 2540, 2540);
-        viewer.moveToFreeSpot(model);
-      }),
-      actionLabel: 'Make it ×25.4',
-      timeout: 15000,
+    const grow = (times, label) => () => viewer.models.includes(model) && viewer.transaction(label, () => {
+      viewer.setScale(model, times * 100, times * 100, times * 100);
+      viewer.moveToFreeSpot(model);
     });
+    const actions = [{ label: 'Inches: ×25.4', run: grow(25.4, 'inches to mm') }];
+    // Only offer meters when the result would still fit on the printer.
+    const bed = viewer.printer.bed;
+    const metersFits = s.x * 1000 <= bed.x && s.y * 1000 <= bed.y && s.z * 1000 <= bed.z;
+    if (metersFits) actions.push({ label: 'Meters (Blender): ×1000', run: grow(1000, 'meters to mm') });
+    const question = metersFits ? 'Was it made in inches, or in meters (Blender)?' : 'Was it made in inches?';
+    toast(`"${model.name}" is tiny (${fmt(biggest, biggest < 1 ? 2 : 1)} mm). ${question}`, { actions, timeout: 15000 });
   } else if (!viewer.checkFit(model)) {
     toast(`"${model.name}" is bigger than the printer.`, {
       kind: 'warn',

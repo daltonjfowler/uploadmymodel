@@ -7,7 +7,7 @@ For the classroom LulzBot printers. Takes about 5 minutes once your model is rea
 - **Tinkercad:** Export → **.STL**.
 - **Onshape:** right-click the part (or the Part Studio tab) → Export → Format **STL**.
 - **Fusion 360:** File → Export → type **STL**. (Or right-click the body → Save As Mesh.)
-- **Blender:** File → Export → **STL**. If it opens tiny on the bed, export again with **Scale**
+- **Blender:** File → Export → **STL**. If it opens tiny on the bed, press **Meters (Blender): ×1000**, or export again with **Scale**
   set to **1000** (Blender works in meters).
 - Thingiverse: download the **STL**, **OBJ** or **3MF** file.
 
@@ -16,7 +16,8 @@ For the classroom LulzBot printers. Takes about 5 minutes once your model is rea
 Go to **uploadmymodel.com** and drop the file on the printer bed (or press **Open model**).
 
 - It shows up orange on the bed. The bed is the real size of the printer.
-- Too tiny? It may have been made in inches: press **Make it ×25.4**.
+- Too tiny? It may have been made in inches: press **Inches: ×25.4**. From Blender (meters): press
+  **Meters (Blender): ×1000**.
 - Too big? Press **Shrink to fit**.
 - A **holes** flag means the file is damaged. It may print with gaps. Export it again.
 
