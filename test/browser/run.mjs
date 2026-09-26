@@ -1,6 +1,6 @@
 // Run the browser tests against a running site and print a summary.
 //   npm run test:browser                          # local wrangler dev on :8787 (npm run dev first)
-//   npm run test:browser -- https://uploadmymodel.com/ <teacher key>
+//   UMM_TEACHER_KEY=<teacher key> npm run test:browser -- https://uploadmymodel.com/
 // Needs Chrome (CHROME_PATH to override). teacher/fixes need the teacher key: locally the
 // TEACHER_KEY from .dev.vars (default below), live the real one. e2e needs the slicer container
 // (SLICER_URL in .dev.vars) and is skipped against the live site. perf is run on its own:
@@ -10,7 +10,8 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const base = process.argv[2] || 'http://127.0.0.1:8787/';
-const key = process.argv[3] || 'local-test-key-not-real';
+// Prefer UMM_TEACHER_KEY: a key on the command line gets echoed by npm into logs.
+const key = process.env.UMM_TEACHER_KEY || process.argv[3] || 'local-test-key-not-real';
 const live = !/127\.0\.0\.1|localhost/.test(base);
 const tests = ['undo', 'angle', 'multi', 'preview', 'autosave', 'health', 'threemf', 'a11y', 'usb', 'teacher', 'fixes', ...(live ? [] : ['e2e', 'limit', 'filename', 'gate'])];
 // (e2e, limit, filename and gate slice real models; run them against local dev with the Docker slicer.)

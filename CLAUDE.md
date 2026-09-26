@@ -46,7 +46,8 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
 - `test/golden/*.gcode`: real G-code sliced by school Cura. Stored byte for byte (`-text`).
 - `test/*.test.mjs`: settings, server and G-code reader checks (`npm test`).
 - `test/browser/`: ~100 browser checks with playwright-core + installed Chrome (`npm run dev`, then
-  `npm run test:browser`; live: `npm run test:browser -- https://uploadmymodel.com/ <teacher key>`).
+  `npm run test:browser`; live: `UMM_TEACHER_KEY=<key> npm run test:browser -- https://uploadmymodel.com/`,
+  never the key as an argument: npm echoes it).
   `node test/browser/perf.test.mjs <base> 500000` times a big model with the CPU slowed 4x.
 
 ## Rules
