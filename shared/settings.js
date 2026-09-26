@@ -38,6 +38,9 @@ export const QUALITIES = [
     layerMm: 0.38,
     firstLayerMm: 0.4,
     topBottomMm: 1.4,
+    // Nozzle °C from the 4.13.2 PolyLite PLA quality file (engine/res4132, the container's AppImage).
+    nozzleC: 215,
+    firstLayerNozzleC: 210,
     blurb: 'Thick layers. Prints fastest. You can see the lines.',
   },
   {
@@ -47,6 +50,8 @@ export const QUALITIES = [
     layerMm: 0.25,
     firstLayerMm: 0.35,
     topBottomMm: 1.25,
+    nozzleC: 215,
+    firstLayerNozzleC: 210,
     blurb: 'Good balance of speed and looks.',
   },
   {
@@ -56,6 +61,8 @@ export const QUALITIES = [
     layerMm: 0.18,
     firstLayerMm: 0.35,
     topBottomMm: 1.05,
+    nozzleC: 210,
+    firstLayerNozzleC: 205,
     blurb: 'Thin layers. Smooth and detailed. Slowest.',
   },
 ];
@@ -151,12 +158,15 @@ export const SECTIONS = [
   { id: 'adhesion', label: 'Build plate adhesion', icon: '▭' },
 ];
 
-// Shown greyed out with a lock. Values from the school G-code (docs/HARDWARE.md). The server
-// never reads these: the frozen class profile is the only source.
-export const LOCKED = [
+// Shown greyed out with a lock. Temperatures follow the layer height's Cura quality profile
+// (High Detail matches the school G-code, docs/HARDWARE.md). The server never reads these: the
+// frozen profile files are the only source.
+export function lockedRows(settings) {
+  const q = qualityById(settings?.quality);
+  return [
   { section: 'Material', rows: [
     ['Filament', 'Polymaker PolyLite PLA, 2.85 mm'],
-    ['Nozzle temperature', '210 °C (205 °C first layer)'],
+    ['Nozzle temperature', `${q.nozzleC} °C (${q.firstLayerNozzleC} °C first layer)`],
     ['Bed temperature', '60 °C (65 °C first layer)'],
   ] },
   { section: 'Speed', rows: [
@@ -170,7 +180,8 @@ export const LOCKED = [
     ['Start', 'Wipe nozzle, probe bed, prime'],
     ['End', 'Cool bed to 35 °C, present the print'],
   ] },
-];
+  ];
+}
 
 const byId = (list, id) => list.find((o) => o.id === id);
 
@@ -309,7 +320,7 @@ export function validateClassConfig(input) {
   let message = '';
   if (input.message !== undefined) {
     if (typeof input.message !== 'string') errors.push('message: must be text');
-    else message = input.message.replace(/[ -]/g, ' ').trim();
+    else message = input.message.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
     if (message.length > MAX_CLASS_MESSAGE) errors.push(`message: at most ${MAX_CLASS_MESSAGE} characters`);
   }
   return errors.length ? { ok: false, errors } : { ok: true, config: { open, defaults, message } };

@@ -50,6 +50,10 @@ now and then, see `docs/ENGINE_OPTIONS.md`).
     students rely on it: hollow branches are lighter and snap off easily, but may be weaker.
 - Sample model from the page, end to end through the Worker: 0.8 s in the container, 1.6 s from
   click to Preview on this PC.
+- Every student choice (`node container/test-matrix.mjs`): all 3 layer heights, all 7 infill
+  patterns, 0% and 100% infill, 2-4 walls, supports off / plate / everywhere, angles 40° and 80°,
+  brim: 20 slices, all first try. Fast and Standard start at 210 °C then print at 215 °C, High
+  Detail 205 / 210 °C, exactly as in the 4.13.2 quality files.
 
 ## Before going live
 

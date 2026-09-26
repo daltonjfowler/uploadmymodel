@@ -3,7 +3,7 @@
 // teacher's locked settings greyed out). Both tabs edit the same settings object.
 
 import {
-  ADHESION_CHOICES, DEFAULT_CLASS_CONFIG, INFILL_PATTERNS, LOCKED, QUALITIES, SECTIONS, SETTINGS,
+  ADHESION_CHOICES, DEFAULT_CLASS_CONFIG, INFILL_PATTERNS, QUALITIES, SECTIONS, SETTINGS, lockedRows,
   SUPPORT_CHOICES, TREE_SUPPORT_INFILL, applyClassLocks, isClassDefault, qualityById, summarize,
   validateClassConfig, validateSettings,
 } from '../../shared/settings.js';
@@ -274,7 +274,7 @@ export class SettingsPanel extends EventTarget {
     const locked = el('section', { class: 'cat locked open' });
     locked.innerHTML = `<div class="cat-head static"><span class="cat-icon" aria-hidden="true">🔒</span><span>Set by your teacher</span></div>`;
     const rows = el('div', { class: 'cat-rows' });
-    for (const group of LOCKED) {
+    for (const group of lockedRows(this.settings)) {
       rows.append(el('div', { class: 'row-group' }, group.section));
       for (const [label, value] of group.rows) {
         const r = el('div', { class: 'row lockedrow' });

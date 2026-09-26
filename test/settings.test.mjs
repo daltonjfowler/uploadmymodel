@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  CLASS_DEFAULTS, INFILL_PATTERNS, PRINTER, SETTINGS, TREE_SUPPORT_INFILL, applyClassLocks, checkAgainstClass,
+  CLASS_DEFAULTS, INFILL_PATTERNS, PRINTER, SETTINGS, TREE_SUPPORT_INFILL, applyClassLocks, checkAgainstClass, lockedRows,
   safeNamePart, summarize, toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
 import { checkPlateSTL } from '../src/worker.js';
@@ -62,6 +62,13 @@ test('Cura overrides: tree supports always 0% infill, temperatures never present
   assert.equal(validateSettings({ supportAngle: 45 }).settings.supportAngle, 45);
   assert.equal(toCuraOverrides({ supportAngle: 75 }).support_angle, 75);
   for (const p of INFILL_PATTERNS) assert.equal(toCuraOverrides({ infillPattern: p.id }).infill_pattern, p.id);
+});
+
+test('locked temperature rows follow the layer height (4.13.2 quality files)', () => {
+  const nozzle = (quality) => lockedRows({ quality })[0].rows.find((r) => r[0] === 'Nozzle temperature')[1];
+  assert.equal(nozzle('high_detail'), '210 °C (205 °C first layer)');
+  assert.equal(nozzle('standard'), '215 °C (210 °C first layer)');
+  assert.equal(nozzle('high_speed'), '215 °C (210 °C first layer)');
 });
 
 test('safe file names', () => {
