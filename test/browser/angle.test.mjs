@@ -54,6 +54,8 @@ await page.click('#action button.primary');
 check('page sends support angle 80', sent.supportAngle, 80);
 check('page sends everywhere', sent.support, 'everywhere');
 const answer = await resP;
+await answer.body().catch(() => {}); // the whole file, before the browser closes
+console.log('  slice status', answer.status(), (await answer.text().catch(() => '')).slice(0, 160));
 check('server accepted it (501 echo or 200 G-code)', [200, 501].includes(answer.status()), true);
 if (answer.status() === 501) {
   const body = await answer.json();

@@ -83,6 +83,15 @@ test('under the limit is fine', async () => {
   assert.equal(res.status, 200);
 });
 
+test('a slicer that stops mid-file is a refusal, not a broken download', async () => {
+  globalThis.fetch = async () => new Response(new ReadableStream({
+    start(c) { c.enqueue(new TextEncoder().encode(';FLAVOR')); c.error(new Error('connection lost')); },
+  }), { headers: { 'x-print-time-s': '60' } });
+  const res = await worker.fetch(await sliceRequest(), env());
+  assert.equal(res.status, 502);
+  assert.match((await res.json()).message, /stopped halfway/);
+});
+
 test('slicer failures become friendly refusals', async () => {
   fakeSlicer({ status: 500 });
   let res = await worker.fetch(await sliceRequest(), env());

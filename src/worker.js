@@ -303,7 +303,15 @@ async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinut
   }
   const summary = [time ? formatMinutes(time / 60) : null, grams ? `${Math.round(grams)} g of plastic` : null, layers ? `${layers} layers` : null]
     .filter(Boolean).join(' · ');
-  return new Response(res.body, {
+  // Read the whole file before answering: if the student closes the tab mid-download, the slicer
+  // connection is already finished, not cut off. (A few MB; well inside Worker memory.)
+  let gcode;
+  try {
+    gcode = await res.arrayBuffer();
+  } catch {
+    return refuse(502, 'The slicer stopped halfway. Try again.');
+  }
+  return new Response(gcode, {
     status: 200,
     headers: {
       'content-type': 'text/plain; charset=utf-8',

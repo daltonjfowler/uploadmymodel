@@ -33,5 +33,15 @@ check('starts with Cura header', text.startsWith(';FLAVOR:Marlin'), true);
 check('school start block (G26 probe-fail clear)', /^G26\s+; clear potential 'probe fail' condition/m.test(text), true);
 check('waits for 205 °C before the first layer', /^M109 R205\s+; wait for extruder to reach printing temp/m.test(text), true);
 check('summary has no garbled characters', !/Â/.test(await page.$eval('#action .result p', (e) => e.textContent)), true);
+// A student slices and closes the tab straight away: the server must shrug it off.
+const quitter = await ctx.newPage();
+await quitter.goto(base);
+await quitter.waitForTimeout(400);
+await quitter.click('#action button.primary').catch(() => {}); // the plate came back from autosave
+await quitter.waitForTimeout(150);
+await quitter.close();
+await new Promise((r) => setTimeout(r, 2500));
+const health = await fetch(base.replace('?debug', '') + 'api/health').then((r) => r.status).catch(() => 'down');
+check('server still up after a tab closed mid-slice', health, 200);
 console.log(errors.join('\n') || 'no errors');
 await browser.close();
