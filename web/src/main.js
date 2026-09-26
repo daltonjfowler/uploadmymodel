@@ -665,8 +665,14 @@ function fileName() {
   return gcodeFileName(customFileName, studentName(), viewer.models[0]?.name ?? 'model');
 }
 
+// What the plate is called: the first model's file name (parts split from one file keep it).
+function plateName() {
+  const m = viewer.models[0];
+  return m ? (m.fileBase ?? m.name) : 'model';
+}
+
 function defaultFileName() {
-  return gcodeFileName('', studentName(), viewer.models[0]?.name ?? 'model').replace(/\.gcode$/, '');
+  return gcodeFileName('', studentName(), plateName()).replace(/\.gcode$/, '');
 }
 
 function renderAction() {
@@ -822,7 +828,7 @@ async function runSlice() {
   form.append('model', new Blob([stl], { type: 'model/stl' }), 'plate.stl');
   form.append('settings', JSON.stringify(panel.value));
   form.append('name', studentName());
-  form.append('modelName', viewer.models[0].name);
+  form.append('modelName', plateName());
   form.append('fileName', customFileName);
   // A random id for this browser, only for the slicer's fair-use limit (a school shares one IP).
   let clientId = '';

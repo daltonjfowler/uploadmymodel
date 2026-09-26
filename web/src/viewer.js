@@ -672,6 +672,7 @@ export class Viewer extends EventTarget {
     const copy = new Model(model.name, model.geometry.attributes.position.array.slice());
     copy.original = model.original.slice();
     copy.health = model.health;
+    copy.fileBase = model.fileBase;
     copy.mesh.scale.copy(model.mesh.scale);
     copy.position.copy(model.position);
     this.paint(copy);
@@ -693,6 +694,7 @@ export class Viewer extends EventTarget {
     const s = model.mesh.scale;
     const made = parts.map((p, i) => {
       const m = new Model(`${model.name} ${i + 1}`, p.positions);
+      m.fileBase = model.fileBase ?? model.name; // the G-code is still named after the file
       m.mesh.scale.copy(s);
       m.position.set(model.position.x + p.cx * s.x, model.position.y + p.cy * s.y, 0);
       this.paint(m);
@@ -1373,6 +1375,7 @@ export class Viewer extends EventTarget {
   snapshot() {
     return this.models.map((m) => ({
       name: m.name,
+      fileBase: m.fileBase,
       positions: m.geometry.attributes.position.array.slice(),
       original: m.original,
       scale: [m.mesh.scale.x, m.mesh.scale.y, m.mesh.scale.z],
@@ -1385,6 +1388,7 @@ export class Viewer extends EventTarget {
     for (const it of items) {
       const m = new Model(it.name, it.positions);
       m.original = it.original;
+      m.fileBase = it.fileBase;
       m.mesh.scale.set(...it.scale);
       m.position.set(it.position[0], it.position[1], 0);
       this.paint(m);

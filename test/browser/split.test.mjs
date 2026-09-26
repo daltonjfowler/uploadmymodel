@@ -89,6 +89,7 @@ check('all parts selected', await page.evaluate(() => window.umm.viewer.selectio
 check('the floating part moved off the one below it', await overlaps(), 0);
 const sizes = await page.evaluate(() => window.umm.viewer.models.map((m) => Math.round(m.size.x)));
 check('the overlapping pair stayed one object', sizes.filter((s) => s === 30).length, 1);
+check('G-code still named after the file', await page.$eval('#fileNameInput', (i) => i.placeholder), 'keychains');
 check('toast offers Undo', await page.$eval('.toast .toast-action', (b) => b.textContent), 'Undo');
 await page.screenshot({ path: `${OUT}split-done.png` });
 const places = await page.evaluate(() => window.umm.viewer.models.map((m) => [m.position.x, m.position.y]));
@@ -98,6 +99,10 @@ check('undo puts it back together', await count(), 1);
 await page.keyboard.press('Control+y');
 check('redo splits it again', await count(), 5);
 check('redo puts the parts in the same places', await page.evaluate(() => window.umm.viewer.models.map((m) => [m.position.x, m.position.y])), places);
+await page.waitForTimeout(2500); // autosave waits 1.5 s after the last change
+await page.reload();
+await page.waitForFunction(() => window.umm?.viewer.models.length === 5, null, { timeout: 10000 });
+check('after a reload the name is still the file', await page.$eval('#fileNameInput', (i) => i.placeholder), 'keychains');
 
 // One piece: says so, changes nothing.
 await page.evaluate(() => window.umm.viewer.clear());

@@ -32,7 +32,7 @@ async function run(mode, fn) {
   }
 }
 
-/** items: [{ name, positions, original, scale: [x,y,z], position: [x,y] }] (typed arrays). */
+/** items: [{ name, fileBase?, positions, original, scale: [x,y,z], position: [x,y] }] (typed arrays). */
 export async function savePlate(items) {
   try {
     const bytes = items.reduce((n, m) => n + m.positions.byteLength + m.original.byteLength, 0);
