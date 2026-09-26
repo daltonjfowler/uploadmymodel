@@ -11,11 +11,11 @@ import { fileURLToPath } from 'node:url';
 const base = process.argv[2] || 'http://127.0.0.1:8787/';
 const key = process.argv[3] || 'local-test-key-not-real';
 const live = !/127\.0\.0\.1|localhost/.test(base);
-const tests = ['undo', 'angle', 'multi', 'preview', 'autosave', 'health', 'threemf', 'teacher', 'fixes', ...(live ? [] : ['e2e', 'limit'])];
+const tests = ['undo', 'angle', 'multi', 'preview', 'autosave', 'health', 'threemf', 'a11y', 'teacher', 'fixes', ...(live ? [] : ['e2e', 'limit'])];
 let failed = 0;
 for (const t of tests) {
   const file = fileURLToPath(new URL(`./${t}.test.mjs`, import.meta.url));
-  const args = [file, base, ...(['teacher', 'fixes', 'limit'].includes(t) ? [key] : [])];
+  const args = [file, base, ...(['teacher', 'fixes', 'limit', 'a11y'].includes(t) ? [key] : [])];
   const r = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 600_000 });
   const out = `${r.stdout}${r.stderr}`;
   const pass = (out.match(/^PASS/gm) || []).length;
