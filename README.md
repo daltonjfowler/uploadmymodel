@@ -12,6 +12,8 @@ Internal district tool, sibling of [uploadmycode](https://uploadmycode.com) and
 slicing engine is not connected yet, so Slice checks everything and then says so. See
 [PLAN.md](PLAN.md).
 
+Guides: [students](docs/STUDENT_GUIDE.md) · [teachers](docs/TEACHER_GUIDE.md).
+
 ## Teacher key
 
 The teacher page needs the `TEACHER_KEY` Worker secret. Set or change it with

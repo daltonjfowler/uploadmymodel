@@ -1,0 +1,53 @@
+# How to print with uploadmymodel
+
+For the classroom LulzBot printers. Takes about 5 minutes once your model is ready.
+
+## 1. Get your model
+
+- **Tinkercad:** Export → **.STL**.
+- Onshape, Fusion, Thingiverse: download an **STL**, **OBJ** or **3MF** file.
+
+## 2. Open it
+
+Go to **uploadmymodel.com** and drop the file on the printer bed (or press **Open model**).
+
+- It shows up orange on the bed. The bed is the real size of the printer.
+- Too tiny? It may have been made in inches: press **Make it ×25.4**.
+- Too big? Press **Shrink to fit**.
+- A **holes** flag means the file is damaged. It may print with gaps. Export it again.
+
+## 3. Set it on the bed
+
+- **Move:** drag it. **Turn the view:** drag empty space. **Zoom:** mouse wheel or two fingers.
+- **Put a flat side down.** Rotate tool (**R**) → **Lay flat: pick a face** → click the side that
+  should touch the bed. Or **Biggest flat side down**.
+- **Red means it hangs in the air.** Click **Below** (bottom left) to see underneath. Red parts need
+  supports, or turn the model so less is red.
+- Made a mistake? **Ctrl + Z** undoes it.
+
+## 4. Pick your settings
+
+The **class settings** work for most prints. Change something only if you know why.
+
+| Setting | What it does | When to change it |
+|---|---|---|
+| Print quality | Thin layers look smooth but take longer | **Fast** for rough test parts |
+| Infill | How full the inside is | More (30-50%) for parts that get pushed on |
+| Tree supports | Branches that hold up red parts | Turn off if nothing is red |
+| Brim | A flat rim that helps the part stick | Tall, thin or tiny parts |
+
+Settings with a 🔒 are set by your teacher.
+
+## 5. Slice and save
+
+1. Type your first name (it goes in the file name).
+2. Press **Slice**. Supports can take a minute.
+3. Look at **Preview**: drag the layer slider to watch your print build up.
+4. Press **Save to SD card**, pick the class SD card, then **eject it** before you pull it out.
+
+## 6. Print
+
+Put the card in the printer, pick your file on the screen, and ask your teacher to start it.
+
+**Something wrong?** Read the orange message on the page. It says what to fix. If it still does
+not work, ask your teacher.
