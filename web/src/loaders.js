@@ -4,11 +4,28 @@
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
+import { unzipSync } from 'three/addons/libs/fflate.module.js';
 
 // .gcode opens in the Preview tab instead of on the plate (main.js handles it).
 export const ACCEPT = '.stl,.obj,.3mf,.gcode';
 
 export class LoadError extends Error {}
+
+// 3MF units (3MF core spec) in mm.
+const UNIT_MM = { micron: 0.001, millimeter: 1, centimeter: 10, inch: 25.4, foot: 304.8, meter: 1000 };
+
+/** The unit named on the 3MF's <model> element ("millimeter" when missing). */
+export function threeMfUnit(data) {
+  try {
+    const files = unzipSync(new Uint8Array(data), { filter: (f) => /\.model$/i.test(f.name) });
+    for (const bytes of Object.values(files)) {
+      const head = new TextDecoder().decode(bytes.subarray(0, 4096));
+      const m = /<model\b[^>]*\bunit\s*=\s*["']([a-z]+)["']/i.exec(head);
+      if (m) return m[1].toLowerCase();
+    }
+  } catch { /* not a zip: the 3MF loader reports it */ }
+  return 'millimeter';
+}
 
 function extension(name) {
   const m = /\.([a-z0-9]+)$/i.exec(name);
@@ -62,9 +79,12 @@ export async function loadModelFile(file) {
     } else if (ext === 'obj') {
       positions = flatten(new OBJLoader().parse(await file.text()));
     } else if (ext === '3mf') {
-      // 3MF is Z-up in mm, like the printer and our world, so no turning needed. (three's loader
-      // ignores the file's unit; an inch model shows up tiny and the page offers ×25.4.)
-      positions = flatten(new ThreeMFLoader().parse(await file.arrayBuffer()));
+      // 3MF is Z-up like the printer and our world, so no turning needed. three's loader ignores
+      // the file's unit, so scale to mm here.
+      const data = await file.arrayBuffer();
+      positions = flatten(new ThreeMFLoader().parse(data));
+      const k = UNIT_MM[threeMfUnit(data)] ?? 1;
+      if (k !== 1) for (let i = 0; i < positions.length; i++) positions[i] *= k;
     } else {
       throw new LoadError(`uploadmymodel opens STL, OBJ and 3MF files. "${file.name}" is not one of those.`);
     }
