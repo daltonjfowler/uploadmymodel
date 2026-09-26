@@ -7,6 +7,7 @@ import { LIMITS, PRINTER, safeNamePart, summarize } from '../../shared/settings.
 import { $, el, esc, fmt } from './dom.js';
 import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.js';
 import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
+import { meshHealth } from './mesh-health.js';
 import { clearPlate, loadPlate, savePlate } from './plate-store.js';
 import { SettingsPanel } from './settings-panel.js';
 import { initThemeButton, isDark, onThemeChange } from './theme.js';
@@ -130,12 +131,30 @@ async function loadFiles(files) {
       }
       const model = viewer.addModel(name, positions);
       checkUnits(model);
+      checkHealth(model);
     } catch (err) {
       toast(err instanceof LoadError ? err.message : `Could not open "${file.name}".`, { kind: 'error', timeout: 10000 });
       if (!(err instanceof LoadError)) console.error(err);
     }
   }
   busy(null);
+}
+
+// Holes and broken edges (see mesh-health.js), checked once per model when the browser is idle.
+const idle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 300));
+function checkHealth(model, { quiet = false } = {}) {
+  idle(() => {
+    if (!viewer.models.includes(model) || model.health) return;
+    model.health = meshHealth(model.original);
+    const { openEdges, badEdges } = model.health;
+    if (!openEdges && !badEdges) return;
+    renderObjects();
+    if (quiet) return;
+    toast(`"${model.name}" has holes or broken edges, so it may print with gaps. If the print looks wrong, fix the model or export it again.`, {
+      kind: 'warn',
+      timeout: 12000,
+    });
+  }, { timeout: 3000 });
 }
 
 // A model made in inches shows up 25.4 times too small; one made in the wrong units can also be
@@ -423,9 +442,13 @@ function renderObjects() {
   list.innerHTML = '';
   for (const m of viewer.models) {
     const s = m.size;
+    const broken = m.health && (m.health.openEdges || m.health.badEdges);
     const li = el('li', { class: `${viewer.selection.has(m) ? 'on' : ''} ${m.outside ? 'bad' : ''}` });
-    const b = el('button', { type: 'button', title: m.outside ? `This model is ${m.fitProblem}.` : `${m.name} (Ctrl + click to pick several)` });
-    b.innerHTML = `<span class="obj-name">${m.outside ? '⚠ ' : ''}${esc(m.name)}</span><span class="obj-size">${fmt(s.x)} × ${fmt(s.y)} × ${fmt(s.z)} mm</span>`;
+    const title = m.outside ? `This model is ${m.fitProblem}.`
+      : broken ? `${m.name} has holes or broken edges (${m.health.openEdges + m.health.badEdges}). It may print with gaps.`
+        : `${m.name} (Ctrl + click to pick several)`;
+    const b = el('button', { type: 'button', title });
+    b.innerHTML = `<span class="obj-name">${m.outside ? '⚠ ' : ''}${esc(m.name)}${broken ? ' <span class="obj-flag">holes</span>' : ''}</span><span class="obj-size">${fmt(s.x)} × ${fmt(s.y)} × ${fmt(s.z)} mm</span>`;
     b.addEventListener('click', (e) => (e.ctrlKey || e.metaKey ? viewer.toggleSelect(m) : viewer.select(m)));
     li.append(b);
     list.append(li);
@@ -857,6 +880,7 @@ renderTools();
 loadPlate().then((saved) => {
   if (saved && !viewer.models.length) {
     viewer.restore(saved.items);
+    for (const m of viewer.models) checkHealth(m, { quiet: true });
     const n = saved.items.length;
     toast(`Your plate from last time is back (${n} object${n === 1 ? '' : 's'}).`, {
       action: () => {

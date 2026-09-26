@@ -282,6 +282,7 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .object-list li.bad .obj-name { color: var(--bad); }
 .obj-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .obj-size { color: var(--muted); font-size: .76rem; font-variant-numeric: tabular-nums; }
+.obj-flag { font-size: .7rem; font-weight: 700; color: var(--warn); background: var(--warn-soft); border-radius: 4px; padding: 0 4px; }
 .objects-actions { display: flex; justify-content: space-between; padding: 3px 8px 5px; border-top: 1px solid var(--line); }
 .views { display: flex; padding: 3px; gap: 2px; }
 .views button { border: 0; background: none; padding: 5px 9px; font-size: .8rem; font-weight: 600; color: var(--muted); }

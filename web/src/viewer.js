@@ -660,6 +660,7 @@ export class Viewer extends EventTarget {
     if (!model) return null;
     const copy = new Model(model.name, model.geometry.attributes.position.array.slice());
     copy.original = model.original.slice();
+    copy.health = model.health;
     copy.mesh.scale.copy(model.mesh.scale);
     copy.position.copy(model.position);
     this.paint(copy);
