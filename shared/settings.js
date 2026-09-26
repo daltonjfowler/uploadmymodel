@@ -285,12 +285,23 @@ export function safeNamePart(text, fallback = 'model') {
 
 export const MAX_CLASS_MESSAGE = 160;
 
+// Longest print the teacher allows, in minutes (0 = no limit). A short list, like every setting.
+export const PRINT_LIMITS = [0, 30, 45, 60, 90, 120, 180, 240, 300, 480];
+
 export const DEFAULT_CLASS_CONFIG = Object.freeze({
   // Everything open by default, so the site works the same before a teacher ever saves.
   open: Object.freeze(Object.fromEntries(SETTINGS.map((d) => [d.id, true]))),
   defaults: CLASS_DEFAULTS,
   message: '',
+  maxPrintMinutes: 0,
 });
+
+/** 150 -> "2 h 30 min", 45 -> "45 min". */
+export function formatMinutes(minutes) {
+  const m = Math.round(minutes);
+  if (m < 60) return `${m} min`;
+  return m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} h`;
+}
 
 /**
  * Check a class setup from the teacher page (or from KV). Same rule as student settings: anything
@@ -323,7 +334,12 @@ export function validateClassConfig(input) {
     else message = input.message.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
     if (message.length > MAX_CLASS_MESSAGE) errors.push(`message: at most ${MAX_CLASS_MESSAGE} characters`);
   }
-  return errors.length ? { ok: false, errors } : { ok: true, config: { open, defaults, message } };
+  let maxPrintMinutes = 0;
+  if (input.maxPrintMinutes !== undefined) {
+    if (PRINT_LIMITS.includes(input.maxPrintMinutes)) maxPrintMinutes = input.maxPrintMinutes;
+    else errors.push('maxPrintMinutes: not one of the choices');
+  }
+  return errors.length ? { ok: false, errors } : { ok: true, config: { open, defaults, message, maxPrintMinutes } };
 }
 
 /** Student settings checked against the class setup: locked settings must equal the teacher's. */

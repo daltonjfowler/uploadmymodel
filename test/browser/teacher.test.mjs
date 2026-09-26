@@ -24,6 +24,7 @@ await page.fill('#key', key);
 await page.click('#load');
 await page.waitForSelector('#setup:not([hidden])');
 check('7 setting rows', await page.$$eval('#rows tr', (r) => r.length), 7);
+check('print limit choices', await page.$$eval('#maxPrint option', (o) => o.map((x) => x.textContent)), ['No limit', '30 min', '45 min', '1 h', '1 h 30 min', '2 h', '3 h', '4 h', '5 h', '8 h']);
 await page.selectOption('select[aria-label="Wall count: starts at"]', '3');
 await page.click('input[aria-label="Students can change Wall count"] + .switch');
 await page.selectOption('select[aria-label="Infill density: starts at"]', '15');

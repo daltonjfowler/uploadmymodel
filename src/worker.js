@@ -14,8 +14,8 @@
 // TEACHER_KEY secret (npx wrangler secret put TEACHER_KEY). No secret set = no teacher access.
 
 import {
-  DEFAULT_CLASS_CONFIG, LIMITS, PRINTER, checkAgainstClass, safeNamePart, summarize, toCuraOverrides,
-  validateClassConfig, validateSettings,
+  DEFAULT_CLASS_CONFIG, LIMITS, PRINTER, checkAgainstClass, formatMinutes, safeNamePart, summarize,
+  toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
 
 const KV_CLASS = 'class';
@@ -204,7 +204,8 @@ async function handleSlice(request, env) {
   }
   const checked = validateSettings(settingsInput);
   if (!checked.ok) return refuse(400, 'Those print settings are not allowed. Press "Back to class settings" and try again.', { details: checked.errors });
-  const locked = checkAgainstClass(checked.settings, await readClassConfig(env));
+  const classConfig = await readClassConfig(env);
+  const locked = checkAgainstClass(checked.settings, classConfig);
   if (locked.length) {
     return refuse(400, `Your teacher has locked ${locked.join(', ')}. Reload the page to get the class settings.`, { locked });
   }
@@ -224,7 +225,7 @@ async function handleSlice(request, env) {
   // (.dev.vars, with the container running in Docker). Still to decide before it goes live:
   // Cloudflare Container sizing and cost, teacher limits on print time, and a header comment /
   // M117 with the student's name.
-  if (env.SLICER_URL) return sliceWithEngine(env.SLICER_URL, stlBytes, checked.settings, fileName);
+  if (env.SLICER_URL) return sliceWithEngine(env.SLICER_URL, stlBytes, checked.settings, fileName, classConfig.maxPrintMinutes);
 
   return json(501, {
     error: 'engine_not_ready',
@@ -237,12 +238,7 @@ async function handleSlice(request, env) {
   });
 }
 
-function formatMinutes(seconds) {
-  const m = Math.round(seconds / 60);
-  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
-}
-
-async function sliceWithEngine(base, stlBytes, settings, fileName) {
+async function sliceWithEngine(base, stlBytes, settings, fileName, maxPrintMinutes = 0) {
   let res;
   try {
     res = await fetch(new URL('/slice', base), {
@@ -261,7 +257,13 @@ async function sliceWithEngine(base, stlBytes, settings, fileName) {
   const time = Number(res.headers.get('x-print-time-s'));
   const grams = Number(res.headers.get('x-filament-g'));
   const layers = res.headers.get('x-layers');
-  const summary = [time ? formatMinutes(time) : null, grams ? `${Math.round(grams)} g of plastic` : null, layers ? `${layers} layers` : null]
+  // The teacher's longest-print limit, checked against the slicer's own estimate.
+  if (maxPrintMinutes && time > maxPrintMinutes * 60) {
+    await res.body?.cancel();
+    return refuse(400, `This print would take about ${formatMinutes(time / 60)}. Your teacher's limit is ${formatMinutes(maxPrintMinutes)}. `
+      + 'Try Fast quality, less infill, or make the model smaller.', { tooLong: true, printMinutes: Math.round(time / 60) });
+  }
+  const summary = [time ? formatMinutes(time / 60) : null, grams ? `${Math.round(grams)} g of plastic` : null, layers ? `${layers} layers` : null]
     .filter(Boolean).join(' · ');
   return new Response(res.body, {
     status: 200,

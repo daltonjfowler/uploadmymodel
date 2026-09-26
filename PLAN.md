@@ -177,8 +177,9 @@ the layer preview (Preview tab) once there is G-code, and a real test with stude
 ### Phase 3: Teacher page (skeleton built early, 2026-09-26)
 Built: `/teacher/` with the teacher key, a switch per setting (students may change it, or it is
 locked at the teacher's value), class defaults, and a note shown to students. Stored in this app's
-own KV; the Worker refuses a slice that changes a locked setting. Still to do from the list below:
-class phrase, limits, warm-up.
+own KV; the Worker refuses a slice that changes a locked setting. Also a longest-print limit,
+checked against the slicer's own time estimate (works once the slicer is connected). Still to do
+from the list below: class phrase, size and copy limits, warm-up.
 - Teacher key, class phrase, which presets are visible, supports allowed, max time / size / copies,
   warm-up button for the container.
 - **Review gate:** Dalton sets up a class without help.

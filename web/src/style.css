@@ -394,6 +394,8 @@ body.page { overflow: auto; }
 .setup-table tr.is-locked { background: repeating-linear-gradient(135deg, transparent 0 10px, color-mix(in srgb, var(--card2) 70%, transparent) 10px 20px); }
 textarea { font: inherit; color: inherit; width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; background: var(--card2); resize: vertical; }
 .setup-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.limit-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.limit-row select { padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
 .status { margin: 0; min-height: 1.4em; font-weight: 600; }
 .status[data-tone="ok"] { color: var(--ok); }
 .status[data-tone="error"] { color: var(--bad); }

@@ -4,7 +4,7 @@
 
 import './style.css';
 import {
-  CLASS_DEFAULTS, DEFAULT_CLASS_CONFIG, MAX_CLASS_MESSAGE, SETTINGS, summarize,
+  CLASS_DEFAULTS, DEFAULT_CLASS_CONFIG, MAX_CLASS_MESSAGE, PRINT_LIMITS, SETTINGS, formatMinutes, summarize,
 } from '../../shared/settings.js';
 import { $, el } from './dom.js';
 import { initThemeButton } from './theme.js';
@@ -119,8 +119,19 @@ function renderRows() {
   }
   $('#message').value = config.message;
   $('#count').textContent = String(config.message.length);
+  const max = $('#maxPrint');
+  max.innerHTML = '';
+  for (const m of PRINT_LIMITS) {
+    const o = el('option', { value: String(m) }, m ? formatMinutes(m) : 'No limit');
+    if (m === (config.maxPrintMinutes ?? 0)) o.selected = true;
+    max.append(o);
+  }
   renderSummary();
 }
+
+$('#maxPrint').addEventListener('change', () => {
+  config.maxPrintMinutes = Number($('#maxPrint').value);
+});
 
 function renderSummary() {
   $('#summary').textContent = `Students start at: ${summarize(config.defaults)}.`;

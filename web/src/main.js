@@ -3,7 +3,7 @@
 // (STL/OBJ/3MF), shared/settings.js (what may be changed; the Worker checks the same list).
 
 import './style.css';
-import { LIMITS, PRINTER, safeNamePart, summarize } from '../../shared/settings.js';
+import { LIMITS, PRINTER, formatMinutes, safeNamePart, summarize } from '../../shared/settings.js';
 import { $, el, esc, fmt } from './dom.js';
 import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.js';
 import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
@@ -520,6 +520,9 @@ function renderAction() {
 
   const sum = el('p', { class: 'action-summary' }, summarize(panel.value));
   card.append(sum);
+  if (panel.config.maxPrintMinutes) {
+    card.append(el('p', { class: 'note' }, `Your teacher's limit: prints up to ${formatMinutes(panel.config.maxPrintMinutes)}.`));
+  }
 
   if (outside.length) {
     const warn = el('p', { class: 'advice warn' });
@@ -875,7 +878,11 @@ function renderPreviewCard() {
 // server cannot be reached the page still works with the school profile (everything open).
 fetch('/api/class')
   .then((r) => (r.ok ? r.json() : null))
-  .then((config) => config && panel.setClassConfig(config))
+  .then((config) => {
+    if (!config) return;
+    panel.setClassConfig(config);
+    renderAction(); // the teacher's print-time limit shows there
+  })
   .catch(() => {});
 
 // The settings card stops above the action card, however tall that is right now.

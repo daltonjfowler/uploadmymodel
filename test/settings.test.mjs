@@ -136,6 +136,12 @@ test('class setup: bad values are refused', () => {
   assert.equal(validateClassConfig({ message: 'a\u0000b' }).config.message, 'a b');
 });
 
+test('class setup: print time limit is one of the choices', () => {
+  assert.equal(validateClassConfig({}).config.maxPrintMinutes, 0);
+  assert.equal(validateClassConfig({ maxPrintMinutes: 120 }).config.maxPrintMinutes, 120);
+  for (const bad of [100, -30, '60', 60.5, null]) assert.equal(validateClassConfig({ maxPrintMinutes: bad }).ok, false, String(bad));
+});
+
 test('class setup: locked settings must match the teacher, open ones may differ', () => {
   const { config } = validateClassConfig({ open: { walls: false, infillDensity: false }, defaults: { walls: 3, infillDensity: 15 } });
   assert.deepEqual(checkAgainstClass({ ...CLASS_DEFAULTS, walls: 3, infillDensity: 15, quality: 'standard' }, config), []);

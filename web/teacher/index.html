@@ -49,6 +49,13 @@
       </table>
       <p class="note" id="summary"></p>
 
+      <h2>Longest print</h2>
+      <label class="limit-row">
+        <span>Refuse files that would print longer than</span>
+        <select id="maxPrint" aria-label="Longest print allowed"></select>
+      </label>
+      <p class="note">Checked with the slicer's own time estimate when a student slices.</p>
+
       <h2>Note to students</h2>
       <textarea id="message" rows="2" maxlength="160" placeholder="e.g. Period 3: keep prints under 2 hours. Ask before using Everywhere supports."></textarea>
       <p class="note"><span id="count">0</span>/160. Shown at the top of the print settings.</p>
@@ -66,7 +73,7 @@
       <h2>Coming next</h2>
       <ul class="plain">
         <li>Class phrase, so only your students can slice (like uploadmycode and uploadmylaser).</li>
-        <li>Limits: longest print time, largest size, copies per student.</li>
+        <li>More limits: largest size, copies per student.</li>
         <li>Warm-up button for the slicer.</li>
       </ul>
     </section>
