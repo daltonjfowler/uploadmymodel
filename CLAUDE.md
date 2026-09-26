@@ -42,6 +42,11 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   the image when it changes. Locally the Worker uses `SLICER_URL` (`.dev.vars`) instead, and
   `npm run dev` runs with `--enable-containers=false` (Windows cannot run containers in wrangler).
   Container time costs money: never loosen the class gate or the rate limits.
+  After deploying slicer changes: (1) read the END of the deploy output and check
+  `npx wrangler containers info a03c4da0-c29e-48ea-a202-269781865e5e` shows a NEW image digest
+  (a Docker hiccup can skip the push silently; just run `npx wrangler deploy` again); (2) a running
+  slicer keeps its old image until it sleeps (2 min without requests), so wait before testing, and
+  change the Worker and slicer in a compatible order (slicer first when it must accept new values).
 - `profiles/current_lulzbot_9_18.json`: the class profile, decoded from the school G-code footer.
 - `test/golden/*.gcode`: real G-code sliced by school Cura. Stored byte for byte (`-text`).
 - `test/*.test.mjs`: settings, server and G-code reader checks (`npm test`).
