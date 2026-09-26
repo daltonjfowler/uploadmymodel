@@ -3,8 +3,9 @@
 // teacher's locked settings greyed out). Both tabs edit the same settings object.
 
 import {
-  ADHESION_CHOICES, CLASS_DEFAULTS, INFILL_PATTERNS, LOCKED, QUALITIES, SECTIONS, SETTINGS,
-  SUPPORT_CHOICES, TREE_SUPPORT_INFILL, isClassDefault, qualityById, summarize, validateSettings,
+  ADHESION_CHOICES, DEFAULT_CLASS_CONFIG, INFILL_PATTERNS, LOCKED, QUALITIES, SECTIONS, SETTINGS,
+  SUPPORT_CHOICES, TREE_SUPPORT_INFILL, applyClassLocks, isClassDefault, qualityById, summarize,
+  validateClassConfig, validateSettings,
 } from '../../shared/settings.js';
 import { el, esc } from './dom.js';
 import { patternIcon } from './pattern-icons.js';
@@ -41,7 +42,7 @@ function infillWords(v) {
 function angleWords(v) {
   if (v <= 45) return 'Lots of support. Even gentle slopes get held up. Uses more plastic.';
   if (v <= 55) return 'More support than normal. Safer for tricky models.';
-  if (v === 60) return 'Class default. Right for most models.';
+  if (v === 60) return "LulzBot's default. Right for most models.";
   if (v <= 70) return 'Less support. Steep slopes print on their own but may droop a little.';
   return 'Very little support. Only nearly flat overhangs get held up. Expect droop.';
 }
@@ -49,13 +50,22 @@ function angleWords(v) {
 const WORDS = { infillDensity: infillWords, supportAngle: angleWords };
 const defOf = (id) => SETTINGS.find((d) => d.id === id);
 
+/** A setting's value in words, e.g. "0.18 mm · Fine detail" or "20%". */
+export function valueText(id, value) {
+  const def = defOf(id);
+  if (def.kind === 'range') return `${value}${def.unit}`;
+  return def.options.find((o) => o.id === value)?.label ?? String(value);
+}
+
 export class SettingsPanel extends EventTarget {
   constructor(root, hint) {
     super();
     this.root = root;
     this.hint = hint;
+    // The teacher's class setup; replaced by setClassConfig() once /api/class answers.
+    this.config = DEFAULT_CLASS_CONFIG;
     const stored = validateSettings(load(STORE_SETTINGS, {}));
-    this.settings = stored.ok ? stored.settings : { ...CLASS_DEFAULTS };
+    this.settings = stored.ok ? stored.settings : { ...this.config.defaults };
     this.mode = load(STORE_MODE, 'recommended') === 'custom' ? 'custom' : 'recommended';
     this.open = load(STORE_OPEN, true) !== false;
     this.openSections = new Set(['quality', 'infill', 'support']);
@@ -76,8 +86,33 @@ export class SettingsPanel extends EventTarget {
     this.dispatchEvent(new Event('change'));
   }
 
+  /** The teacher's class setup: locked settings snap to the teacher's value. */
+  setClassConfig(input) {
+    const v = validateClassConfig(input);
+    if (!v.ok) return;
+    this.config = v.config;
+    const before = JSON.stringify(this.settings);
+    this.settings = applyClassLocks(this.settings, this.config);
+    save(STORE_SETTINGS, this.settings);
+    this.render();
+    if (JSON.stringify(this.settings) !== before) this.dispatchEvent(new Event('change'));
+  }
+
+  isLocked(id) {
+    return !this.config.open[id];
+  }
+
+  // One greyed-out line for a setting the teacher locked.
+  lockedLine(id) {
+    const def = defOf(id);
+    const r = el('div', { class: 'locked-line' });
+    r.innerHTML = `<span>🔒 ${esc(def.label)}</span><strong>${esc(valueText(id, this.settings[id]))}</strong>`;
+    this.hintOn(r, def.label, `Your teacher set this for the class. ${def.help}`);
+    return r;
+  }
+
   reset() {
-    this.settings = { ...CLASS_DEFAULTS };
+    this.settings = { ...this.config.defaults };
     save(STORE_SETTINGS, this.settings);
     this.render();
     this.dispatchEvent(new Event('change'));
@@ -95,7 +130,7 @@ export class SettingsPanel extends EventTarget {
 
   render() {
     const scroll = this.root.querySelector('.settings-body')?.scrollTop ?? 0;
-    const changed = !isClassDefault(this.settings);
+    const changed = !isClassDefault(this.settings, this.config.defaults);
     this.root.classList.toggle('collapsed', !this.open);
     clearTimeout(this.hintTimer);
     this.hint.hidden = true; // its target is about to be replaced
@@ -131,6 +166,11 @@ export class SettingsPanel extends EventTarget {
     this.root.append(tabs);
 
     const body = el('div', { class: 'settings-body' });
+    if (this.config.message) {
+      const note = el('p', { class: 'class-note' });
+      note.append(el('strong', {}, 'From your teacher: '), document.createTextNode(this.config.message));
+      body.append(note);
+    }
     if (this.mode === 'recommended') this.renderRecommended(body);
     else this.renderCustom(body);
     this.root.append(body);
@@ -149,6 +189,7 @@ export class SettingsPanel extends EventTarget {
 
     // Print quality: three big buttons, like picking a Cura profile.
     const quality = this.block(body, 'Print quality', defOf('quality'));
+    if (this.isLocked('quality')) quality.append(this.lockedLine('quality'));
     const seg = el('div', { class: 'seg quality' });
     for (const opt of QUALITIES) {
       const b = el('button', { type: 'button', class: s.quality === opt.id ? 'on' : '' });
@@ -157,30 +198,33 @@ export class SettingsPanel extends EventTarget {
       this.hintOn(b, opt.label, `${opt.layerMm.toFixed(2)} mm layers. ${opt.blurb}`);
       seg.append(b);
     }
-    quality.append(seg, el('p', { class: 'note' }, q.blurb));
+    if (!this.isLocked('quality')) quality.append(seg, el('p', { class: 'note' }, q.blurb));
 
     // Infill slider.
     const infill = this.block(body, 'Infill', defOf('infillDensity'));
-    infill.append(this.rangeSlider('infillDensity'));
+    infill.append(this.isLocked('infillDensity') ? this.lockedLine('infillDensity') : this.rangeSlider('infillDensity'));
 
     // Supports: on/off, then where they may grow and from what angle.
     const support = this.block(body, 'Support', defOf('support'));
-    support.append(this.supportToggle());
+    support.append(this.isLocked('support') ? this.lockedLine('support') : this.supportToggle());
     if (s.support !== 'none') {
-      support.append(this.placementPicker());
-      const angle = el('div', { class: 'sub-setting' });
-      angle.append(el('span', { class: 'sub-label' }, 'Support overhang angle'));
-      angle.append(this.rangeSlider('supportAngle', true));
-      this.hintOn(angle, defOf('supportAngle').label, defOf('supportAngle').help);
-      support.append(angle);
+      if (!this.isLocked('support')) support.append(this.placementPicker());
+      if (this.isLocked('supportAngle')) support.append(this.lockedLine('supportAngle'));
+      else {
+        const angle = el('div', { class: 'sub-setting' });
+        angle.append(el('span', { class: 'sub-label' }, 'Support overhang angle'));
+        angle.append(this.rangeSlider('supportAngle', true));
+        this.hintOn(angle, defOf('supportAngle').label, defOf('supportAngle').help);
+        support.append(angle);
+      }
     }
     const advice = this.supportAdvice();
     if (advice) support.append(advice);
 
     // Adhesion.
     const adhesion = this.block(body, 'Adhesion', defOf('adhesion'));
-    adhesion.append(this.toggle('Brim', s.adhesion === 'brim', (on) => this.set('adhesion', on ? 'brim' : 'skirt'),
-      ADHESION_CHOICES.find((a) => a.id === 'brim').blurb));
+    adhesion.append(this.isLocked('adhesion') ? this.lockedLine('adhesion') : this.toggle('Brim', s.adhesion === 'brim',
+      (on) => this.set('adhesion', on ? 'brim' : 'skirt'), ADHESION_CHOICES.find((a) => a.id === 'brim').blurb));
   }
 
   renderCustom(body) {
@@ -240,15 +284,20 @@ export class SettingsPanel extends EventTarget {
   // Custom mode's Support section, laid out like Cura's: the switch, then the settings that only
   // matter when supports are on.
   supportRows(rows, s) {
-    const on = el('div', { class: 'row' });
-    on.append(el('span', { class: 'row-label' }, 'Generate support'), this.supportToggle(''));
-    this.hintOn(on, 'Generate support', defOf('support').help);
-    rows.append(on);
-    if (s.support === 'none') return;
-    const place = el('div', { class: 'row wide' });
-    place.append(el('span', { class: 'row-label' }, 'Support placement'), this.placementPicker());
-    rows.append(place);
-    rows.append(this.customRow(defOf('supportAngle')));
+    if (this.isLocked('support')) {
+      rows.append(this.customRow(defOf('support')));
+    } else {
+      const on = el('div', { class: 'row' });
+      on.append(el('span', { class: 'row-label' }, 'Generate support'), this.supportToggle(''));
+      this.hintOn(on, 'Generate support', defOf('support').help);
+      rows.append(on);
+      if (s.support !== 'none') {
+        const place = el('div', { class: 'row wide' });
+        place.append(el('span', { class: 'row-label' }, 'Support placement'), this.placementPicker());
+        rows.append(place);
+      }
+    }
+    if (s.support !== 'none') rows.append(this.customRow(defOf('supportAngle')));
   }
 
   supportToggle(label = 'Tree supports') {
@@ -274,6 +323,9 @@ export class SettingsPanel extends EventTarget {
   }
 
   customRow(def) {
+    if (this.isLocked(def.id)) {
+      return this.infoRow(def.label, valueText(def.id, this.settings[def.id]), `Your teacher set this for the class. ${def.help}`, true);
+    }
     const row = el('div', { class: 'row' });
     const label = el('span', { class: 'row-label' }, def.label);
     row.append(label);

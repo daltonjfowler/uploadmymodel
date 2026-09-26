@@ -7,8 +7,16 @@ an SD card. Temperatures, speeds and start/end G-code come only from the teacher
 Internal district tool, sibling of [uploadmycode](https://uploadmycode.com) and
 [uploadmylaser](https://uploadmylaser.com). Made by [Dalton Fowler](https://daltonjfowler.com).
 
-**Status:** the student page is live at https://uploadmymodel.com. The slicing engine is not
-connected yet, so Slice checks everything and then says so. See [PLAN.md](PLAN.md).
+**Status:** the student page is live at https://uploadmymodel.com, with a teacher page at
+[/teacher/](https://uploadmymodel.com/teacher/) to lock settings and set class defaults. The
+slicing engine is not connected yet, so Slice checks everything and then says so. See
+[PLAN.md](PLAN.md).
+
+## Teacher key
+
+The teacher page needs the `TEACHER_KEY` Worker secret. Set or change it with
+`npx wrangler secret put TEACHER_KEY` (use a long random key; there is no lockout, because a school
+shares one IP). For local dev, put a throwaway key in `.dev.vars` (gitignored).
 
 ## Commands
 

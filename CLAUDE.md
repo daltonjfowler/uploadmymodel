@@ -15,10 +15,15 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
     `window.umm = { viewer, panel }` for browser tests.
   - `src/settings-panel.js`: Recommended / Custom settings card and hover help.
   - `src/main.js`: tools, object list, Slice / result card, keyboard, drag and drop.
+  - `teacher/index.html` + `src/teacher.js`: the teacher page (key, which settings are locked,
+    class defaults, a note to students). No three.js on this page.
   - `src/loaders.js`: STL / OBJ / 3MF → triangle soup, and the sample model.
   - `public/`: icons, manifest, `theme-boot.js` (copied as-is into the build).
-- `src/worker.js`: http → https, www → apex, security headers + CSP, `/api/health`, and
-  `/api/slice` (checks settings + STL + limits, then answers 501 until the engine exists).
+- `src/worker.js`: http → https, www → apex, security headers + CSP, `/api/health`,
+  `/api/class` (public class setup), `/api/teacher/class` (GET/PUT, needs `x-teacher-key`), and
+  `/api/slice` (checks settings, the teacher's locks, the STL and limits, then answers 501 until
+  the engine exists). Class setup lives in KV `uploadmymodel-CLASS_KV` under the key `class`.
+  `TEACHER_KEY` is a Worker secret; for local dev put a throwaway one in `.dev.vars`.
 - `scripts/make-icons.mjs`: draws the icon. Edit the icon there, never `web/public/icon.svg` by hand.
 - `docs/HARDWARE.md`: printer and slicer facts, each with its source.
 - `profiles/current_lulzbot_9_18.json`: the class profile, decoded from the school G-code footer.

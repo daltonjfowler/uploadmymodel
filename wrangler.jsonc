@@ -10,6 +10,12 @@
     { "pattern": "www.uploadmymodel.com", "custom_domain": true }
   ],
   "workers_dev": true,
+  "kv_namespaces": [
+    // This app's own namespace (title uploadmymodel-CLASS_KV). Never reuse uploadmycode's
+    // (CLASS_KV) or uploadmylaser's (uploadmylaser-CLASS_KV).
+    { "binding": "CLASS_KV", "id": "348e4cd89f9a4f5da842763149d5d96d" }
+  ],
+  // TEACHER_KEY is a secret: npx wrangler secret put TEACHER_KEY
   // public/ is built from web/ by `npm run build` (npm run deploy does it first).
   "assets": {
     "directory": "./public/",

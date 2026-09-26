@@ -240,8 +240,8 @@ export function summarize(settings) {
   return `${q.layerMm.toFixed(2)} mm · ${s.infillDensity}% · ${support} · ${byId(ADHESION_CHOICES, s.adhesion).label}`;
 }
 
-export function isClassDefault(settings) {
-  return Object.keys(CLASS_DEFAULTS).every((k) => settings[k] === CLASS_DEFAULTS[k]);
+export function isClassDefault(settings, defaults = CLASS_DEFAULTS) {
+  return Object.keys(CLASS_DEFAULTS).every((k) => settings[k] === defaults[k]);
 }
 
 // Model limits the Worker enforces before any slicing (PLAN.md §4). Teacher-set later.
@@ -264,4 +264,65 @@ export function safeNamePart(text, fallback = 'model') {
     .replace(/^-|-$/g, '')
     .slice(0, LIMITS.maxNameLength);
   return cleaned || fallback;
+}
+
+// ---- The teacher's class setup (stored in KV, set on /teacher/) -------------------------------
+// The teacher picks which settings students may change and what every setting starts at. A
+// setting students may not change is locked to the teacher's value: the page shows it greyed out
+// and the Worker refuses a request that changed it.
+
+export const MAX_CLASS_MESSAGE = 160;
+
+export const DEFAULT_CLASS_CONFIG = Object.freeze({
+  // Everything open by default, so the site works the same before a teacher ever saves.
+  open: Object.freeze(Object.fromEntries(SETTINGS.map((d) => [d.id, true]))),
+  defaults: CLASS_DEFAULTS,
+  message: '',
+});
+
+/**
+ * Check a class setup from the teacher page (or from KV). Same rule as student settings: anything
+ * off the lists is an error, never fixed up.
+ * @returns {{ ok: true, config: object } | { ok: false, errors: string[] }}
+ */
+export function validateClassConfig(input) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return { ok: false, errors: ['must be an object'] };
+  const errors = [];
+  const open = { ...DEFAULT_CLASS_CONFIG.open };
+  if (input.open !== undefined) {
+    if (input.open === null || typeof input.open !== 'object' || Array.isArray(input.open)) errors.push('open: must be an object');
+    else {
+      for (const def of SETTINGS) {
+        if (!(def.id in input.open)) continue;
+        if (typeof input.open[def.id] === 'boolean') open[def.id] = input.open[def.id];
+        else errors.push(`open.${def.id}: must be true or false`);
+      }
+    }
+  }
+  let defaults = { ...CLASS_DEFAULTS };
+  if (input.defaults !== undefined) {
+    const d = validateSettings(input.defaults);
+    if (d.ok) defaults = d.settings;
+    else errors.push(...d.errors.map((e) => `defaults.${e}`));
+  }
+  let message = '';
+  if (input.message !== undefined) {
+    if (typeof input.message !== 'string') errors.push('message: must be text');
+    else message = input.message.replace(/[ -]/g, ' ').trim();
+    if (message.length > MAX_CLASS_MESSAGE) errors.push(`message: at most ${MAX_CLASS_MESSAGE} characters`);
+  }
+  return errors.length ? { ok: false, errors } : { ok: true, config: { open, defaults, message } };
+}
+
+/** Student settings checked against the class setup: locked settings must equal the teacher's. */
+export function checkAgainstClass(settings, config) {
+  const locked = SETTINGS.filter((d) => !config.open[d.id] && settings[d.id] !== config.defaults[d.id]);
+  return locked.map((d) => d.label);
+}
+
+/** A student's saved settings, with every locked setting put back to the teacher's value. */
+export function applyClassLocks(settings, config) {
+  const out = { ...config.defaults, ...settings };
+  for (const d of SETTINGS) if (!config.open[d.id]) out[d.id] = config.defaults[d.id];
+  return out;
 }

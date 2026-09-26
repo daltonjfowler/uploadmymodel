@@ -9,6 +9,12 @@ export default defineConfig({
     emptyOutDir: true,
     // three.js is most of the bundle; one file is fine and caches well.
     chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      input: {
+        main: resolve(import.meta.dirname, 'index.html'),
+        teacher: resolve(import.meta.dirname, 'teacher/index.html'),
+      },
+    },
   },
   server: {
     // `npm run dev:web` against a running `wrangler dev` on :8787

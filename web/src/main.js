@@ -625,6 +625,13 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'f' || e.key === 'F') viewer.frameSelection();
 });
 
+// The teacher's class setup: which settings are locked, the class defaults, a note. If the
+// server cannot be reached the page still works with the school profile (everything open).
+fetch('/api/class')
+  .then((r) => (r.ok ? r.json() : null))
+  .then((config) => config && panel.setClassConfig(config))
+  .catch(() => {});
+
 // The settings card stops above the action card, however tall that is right now.
 new ResizeObserver(() => {
   $('#stage').style.setProperty('--action-h', `${$('#action').offsetHeight + 12}px`);

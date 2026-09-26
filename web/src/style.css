@@ -244,6 +244,16 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .pattern-line { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; opacity: .85; }
 .pattern-wall { fill: none; stroke: var(--muted); stroke-width: 2.2; }
 
+.class-note {
+  margin: 0; padding: 8px 10px; border-radius: 8px; font-size: .86rem;
+  background: var(--accent-soft); border: 1px solid var(--accent-line);
+}
+.locked-line {
+  display: flex; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: 8px;
+  background: repeating-linear-gradient(135deg, var(--card2) 0 8px, var(--card) 8px 16px);
+  border: 1px solid var(--line); color: var(--muted); font-size: .88rem;
+}
+.locked-line strong { color: var(--ink); font-weight: 600; }
 .settings-foot { border-top: 1px solid var(--line); padding: 5px 12px; display: flex; justify-content: flex-end; }
 
 /* Hover help card, left of the settings panel (Cura does this) */
@@ -345,6 +355,37 @@ kbd { font: .8rem ui-monospace, Consolas, monospace; border: 1px solid var(--lin
 .footer {
   display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; padding: 6px 16px;
   background: var(--top); border-top: 1px solid var(--line); color: var(--muted); font-size: .8rem;
+}
+
+/* ---- Plain scrolling pages (teacher) ---- */
+body.page { overflow: auto; }
+.page-tag { font-size: .78rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 99px; padding: 2px 10px; }
+.page-main { width: 100%; max-width: 860px; margin: 0 auto; padding: 20px 16px 32px; display: grid; gap: 16px; align-content: start; }
+.lede { margin: 0; color: var(--muted); }
+.page-card { padding: 16px 18px; display: grid; gap: 10px; }
+.page-card h2 { margin: 4px 0 0; font-size: 1.05rem; }
+.key-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.key-row input { flex: 1; min-width: 200px; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; background: var(--card2); }
+.key-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; }
+.setup-table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+.setup-table th { text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.setup-table td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.setup-table td:first-child { display: grid; gap: 2px; max-width: 360px; }
+.setup-table td small { color: var(--muted); font-size: .78rem; line-height: 1.3; }
+.setup-table select { width: 100%; min-width: 150px; padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+.setup-table tr.is-locked td:first-child strong::after { content: " 🔒"; }
+.setup-table tr.is-locked { background: repeating-linear-gradient(135deg, transparent 0 10px, color-mix(in srgb, var(--card2) 70%, transparent) 10px 20px); }
+textarea { font: inherit; color: inherit; width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; background: var(--card2); resize: vertical; }
+.setup-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.status { margin: 0; min-height: 1.4em; font-weight: 600; }
+.status[data-tone="ok"] { color: var(--ok); }
+.status[data-tone="error"] { color: var(--bad); }
+ul.plain { margin: 0; padding-left: 20px; color: var(--muted); }
+@media (max-width: 640px) {
+  .setup-table thead { display: none; }
+  .setup-table tr { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .setup-table td { border: 0; padding: 2px 4px; }
+  .setup-table td:first-child { grid-column: 1 / -1; max-width: none; }
 }
 
 /* ---- Small screens: stack the cards instead of floating them ---- */

@@ -4,8 +4,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  CLASS_DEFAULTS, INFILL_PATTERNS, PRINTER, SETTINGS, TREE_SUPPORT_INFILL, safeNamePart, summarize,
-  toCuraOverrides, validateSettings,
+  CLASS_DEFAULTS, INFILL_PATTERNS, PRINTER, SETTINGS, TREE_SUPPORT_INFILL, applyClassLocks, checkAgainstClass,
+  safeNamePart, summarize, toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
 import { checkPlateSTL } from '../src/worker.js';
 
@@ -107,4 +107,34 @@ test('plate STL: off the bed, floating, broken, or truncated is refused', () => 
   assert.equal(checkPlateSTL(new ArrayBuffer(10)).ok, false);
   // too tall
   assert.equal(checkPlateSTL(stl([[[mid, mid, 0], [mid + 1, mid, 0], [mid, mid, PRINTER.bed.z + 1]]])).ok, false);
+});
+
+// ---- Teacher's class setup ----
+
+test('class setup: defaults are all open with the school profile', () => {
+  const v = validateClassConfig({});
+  assert.equal(v.ok, true);
+  assert.deepEqual(v.config.defaults, { ...CLASS_DEFAULTS });
+  assert.ok(SETTINGS.every((d) => v.config.open[d.id] === true));
+  assert.equal(v.config.message, '');
+});
+
+test('class setup: bad values are refused', () => {
+  for (const bad of [
+    null, [], { open: { walls: 'no' } }, { open: [] }, { defaults: { infillDensity: 7 } },
+    { defaults: { quality: 'ultra' } }, { message: 5 }, { message: 'x'.repeat(161) },
+  ]) {
+    assert.equal(validateClassConfig(bad).ok, false, JSON.stringify(bad));
+  }
+  assert.equal(validateClassConfig({ message: 'a\u0000b' }).config.message, 'a b');
+});
+
+test('class setup: locked settings must match the teacher, open ones may differ', () => {
+  const { config } = validateClassConfig({ open: { walls: false, infillDensity: false }, defaults: { walls: 3, infillDensity: 15 } });
+  assert.deepEqual(checkAgainstClass({ ...CLASS_DEFAULTS, walls: 3, infillDensity: 15, quality: 'standard' }, config), []);
+  assert.deepEqual(checkAgainstClass({ ...CLASS_DEFAULTS, walls: 2, infillDensity: 15 }, config), ['Wall count']);
+  const fixed = applyClassLocks({ ...CLASS_DEFAULTS, walls: 4, infillDensity: 60, quality: 'standard' }, config);
+  assert.equal(fixed.walls, 3);
+  assert.equal(fixed.infillDensity, 15);
+  assert.equal(fixed.quality, 'standard'); // open: the student's choice stays
 });

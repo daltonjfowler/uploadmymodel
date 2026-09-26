@@ -4,12 +4,23 @@
 //   2. /api/* is answered here. Everything else is the built student page in public/.
 //   3. Every response gets the security headers below; HTML also gets the CSP.
 //
-// POST /api/slice does every check the real slicer will need (settings on the allowed lists, a
-// sane STL that fits the bed, size limits, a safe file name) and then answers 501 until the
-// slicing container exists (PLAN.md Phase 1). The page already handles the real answer: G-code
-// bytes with a content-disposition file name.
+// POST /api/slice does every check the real slicer will need (settings on the allowed lists and
+// inside the teacher's locks, a sane STL that fits the bed, size limits, a safe file name) and then
+// answers 501 until the slicing container exists (PLAN.md Phase 1). The page already handles the
+// real answer: G-code bytes with a content-disposition file name.
+//
+// The teacher's class setup (which settings students may change, the class defaults, a note) lives
+// in this app's own KV namespace under "class". GET /api/class is public; /api/teacher/* needs the
+// TEACHER_KEY secret (npx wrangler secret put TEACHER_KEY). No secret set = no teacher access.
 
-import { LIMITS, PRINTER, safeNamePart, summarize, toCuraOverrides, validateSettings } from '../shared/settings.js';
+import {
+  DEFAULT_CLASS_CONFIG, LIMITS, PRINTER, checkAgainstClass, safeNamePart, summarize, toCuraOverrides,
+  validateClassConfig, validateSettings,
+} from '../shared/settings.js';
+
+const KV_CLASS = 'class';
+const MAX_TEACHER_BYTES = 4 * 1024;
+const TEACHER_REJECT_DELAY_MS = 300;
 
 const CANONICAL_HOST = 'uploadmymodel.com';
 
@@ -74,6 +85,68 @@ function refuse(status, message, extra = {}) {
   return json(status, { error: 'refused', message, ...extra });
 }
 
+const encoder = new TextEncoder();
+
+// Secret comparison that leaks nothing through timing: both sides hashed to 32 bytes, then
+// Cloudflare's timingSafeEqual (same as uploadmylaser's src/constant-time.ts).
+async function constantTimeEquals(a, b) {
+  const [left, right] = await Promise.all([
+    crypto.subtle.digest('SHA-256', encoder.encode(a)),
+    crypto.subtle.digest('SHA-256', encoder.encode(b)),
+  ]);
+  return crypto.subtle.timingSafeEqual(left, right);
+}
+
+// The saved class setup, or the open defaults if none is saved (or it no longer passes the
+// checks, e.g. after a setting was removed from shared/settings.js).
+async function readClassConfig(env) {
+  try {
+    const saved = await env.CLASS_KV?.get(KV_CLASS, 'json');
+    if (saved) {
+      const v = validateClassConfig(saved);
+      if (v.ok) return v.config;
+      console.error(JSON.stringify({ message: 'saved class setup no longer valid; using defaults', errors: v.errors }));
+    }
+  } catch (e) {
+    console.error(JSON.stringify({ message: 'class setup read failed', error: String(e) }));
+  }
+  return DEFAULT_CLASS_CONFIG;
+}
+
+// Key compared first; a wrong key waits a moment (slows guessing). No secret uploaded means no
+// teacher endpoint at all: never fall open. The key is long and random, so there is no lockout:
+// a school shares one IP, and a lockout would let one student lock out the teacher.
+async function teacherOk(request, env) {
+  const expected = env.TEACHER_KEY ?? '';
+  if (expected === '') {
+    console.error(JSON.stringify({ message: 'TEACHER_KEY is not set; teacher endpoint refused' }));
+  } else if (await constantTimeEquals(request.headers.get('x-teacher-key') ?? '', expected)) {
+    return true;
+  }
+  await new Promise((r) => setTimeout(r, TEACHER_REJECT_DELAY_MS));
+  return false;
+}
+
+async function handleTeacher(request, env, url) {
+  if (!(await teacherOk(request, env))) return json(401, { error: 'key', message: 'Wrong teacher key.' });
+  if (url.pathname !== '/api/teacher/class') return json(404, { error: 'not_found', message: 'No such API.' });
+  if (request.method === 'GET') return json(200, await readClassConfig(env));
+  if (request.method !== 'PUT') return json(405, { error: 'method', message: 'Use GET or PUT.' });
+  const text = await request.text();
+  if (text.length > MAX_TEACHER_BYTES) return json(413, { error: 'size', message: 'That is too much to save.' });
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return json(400, { error: 'json', message: 'The page sent something the server could not read.' });
+  }
+  const v = validateClassConfig(body);
+  if (!v.ok) return json(400, { error: 'invalid', message: 'Some of those values are not allowed.', details: v.errors });
+  if (!env.CLASS_KV) return json(503, { error: 'storage', message: 'Storage is not set up on this server.' });
+  await env.CLASS_KV.put(KV_CLASS, JSON.stringify(v.config));
+  return json(200, v.config);
+}
+
 /**
  * Check a binary STL made by the page (web/src/viewer.js exportPlateSTL): the length matches the
  * triangle count, every number is real, and every corner is inside the printer. The page checks
@@ -107,7 +180,7 @@ export function checkPlateSTL(buf) {
   return { ok: true, triangles: count, size };
 }
 
-async function handleSlice(request) {
+async function handleSlice(request, env) {
   const length = Number(request.headers.get('content-length') ?? '0');
   if (length > LIMITS.maxUploadBytes + 64 * 1024) {
     return refuse(413, `That plate is too big to send (the most is ${LIMITS.maxUploadBytes / 1048576} MB).`);
@@ -127,6 +200,10 @@ async function handleSlice(request) {
   }
   const checked = validateSettings(settingsInput);
   if (!checked.ok) return refuse(400, 'Those print settings are not allowed. Press "Back to class settings" and try again.', { details: checked.errors });
+  const locked = checkAgainstClass(checked.settings, await readClassConfig(env));
+  if (locked.length) {
+    return refuse(400, `Your teacher has locked ${locked.join(', ')}. Reload the page to get the class settings.`, { locked });
+  }
 
   const model = form.get('model');
   if (!model || typeof model === 'string') return refuse(400, 'No model was sent.');
@@ -152,11 +229,17 @@ async function handleSlice(request) {
   });
 }
 
-async function handleApi(request, url) {
+async function handleApi(request, env, url) {
   if (url.pathname === '/api/health') return json(200, { ok: true, engine: false });
+  if (url.pathname === '/api/class') {
+    if (request.method !== 'GET') return json(405, { error: 'method', message: 'Use GET.' });
+    return json(200, await readClassConfig(env));
+  }
+  // Everything under /api/teacher/ needs the key, even paths that do not exist.
+  if (url.pathname.startsWith('/api/teacher/')) return handleTeacher(request, env, url);
   if (url.pathname === '/api/slice') {
     if (request.method !== 'POST') return json(405, { error: 'method', message: 'Use POST.' });
-    return handleSlice(request);
+    return handleSlice(request, env);
   }
   return json(404, { error: 'not_found', message: 'No such API.' });
 }
@@ -168,7 +251,7 @@ export default {
       return withSecurityHeaders(new Response(null, { status: 301, headers: { location: target } }));
     }
     const url = new URL(request.url);
-    if (url.pathname.startsWith('/api/')) return withSecurityHeaders(await handleApi(request, url));
+    if (url.pathname.startsWith('/api/')) return withSecurityHeaders(await handleApi(request, env, url));
     return withSecurityHeaders(await env.ASSETS.fetch(request));
   },
 };

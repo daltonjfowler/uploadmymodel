@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>uploadmymodel · teacher</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#9A3412">
+  <!-- Blocking on purpose: sets data-theme before the first paint. -->
+  <script src="/theme-boot.js"></script>
+</head>
+<body class="page">
+  <header class="titlebar">
+    <strong class="brand"><img src="/icon.svg" alt="" width="36" height="36">uploadmymodel</strong>
+    <span class="page-tag">Teacher</span>
+    <span class="grow"></span>
+    <a class="toplink" href="/">← Student page</a>
+    <button id="theme" class="themebtn" type="button">🖥️ System</button>
+  </header>
+
+  <main class="page-main">
+    <p class="lede">Choose which print settings students may change and what they start at. Changes reach
+      students the next time they open or reload the page. Temperatures, speeds and start/end G-code are
+      never student settings.</p>
+
+    <section class="card page-card">
+      <h2>Teacher key</h2>
+      <div class="key-row">
+        <input id="key" type="password" autocomplete="off" placeholder="teacher key" aria-label="Teacher key">
+        <button id="load" class="primary" type="button">Open class setup</button>
+      </div>
+      <div class="key-actions">
+        <label class="check"><input id="remember" type="checkbox"> <span>Remember on this computer</span></label>
+        <button id="forget" class="linkbtn" type="button">Forget the key on this computer</button>
+      </div>
+    </section>
+
+    <section id="setup" class="card page-card" hidden>
+      <h2>Class settings</h2>
+      <p class="note">Turn a setting off to lock it: students see it greyed out at your value, and the server
+        refuses a file that changes it.</p>
+      <table class="setup-table">
+        <thead><tr><th>Setting</th><th>Students can change</th><th>Starts at</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p class="note" id="summary"></p>
+
+      <h2>Note to students</h2>
+      <textarea id="message" rows="2" maxlength="160" placeholder="e.g. Period 3: keep prints under 2 hours. Ask before using Everywhere supports."></textarea>
+      <p class="note"><span id="count">0</span>/160. Shown at the top of the print settings.</p>
+
+      <div class="setup-actions">
+        <button id="school" class="linkbtn" type="button">↺ Back to the school profile (all open)</button>
+        <span class="grow"></span>
+        <button id="save" class="primary big" type="button">Save for the class</button>
+      </div>
+    </section>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <section class="card page-card">
+      <h2>Coming next</h2>
+      <ul class="plain">
+        <li>Class phrase, so only your students can slice (like uploadmycode and uploadmylaser).</li>
+        <li>Limits: longest print time, largest size, copies per student.</li>
+        <li>Warm-up button for the slicer.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Internal district tool.</span>
+    <a href="https://uploadmycode.com" target="_blank" rel="noopener">uploadmycode</a>
+    <a href="https://uploadmylaser.com" target="_blank" rel="noopener">uploadmylaser</a>
+    <a href="https://teachchat.app" target="_blank" rel="noopener">teachChat</a>
+    <a href="https://daltonjfowler.com" target="_blank" rel="noopener">Made by Dalton Fowler</a>
+    <a href="https://github.com/daltonjfowler/uploadmymodel" target="_blank" rel="noopener">Open source</a>
+  </footer>
+
+  <script type="module" src="/src/teacher.js"></script>
+</body>
+</html>
