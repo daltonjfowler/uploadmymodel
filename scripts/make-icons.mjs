@@ -9,8 +9,11 @@ import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 
 const OUT = process.argv[2] || '.';
-const TEAL = '#1F9FA5', WHITE = '#FFFFFF', DARK = '#0F3D40', FLOOR = '#18868B';
-const ARROW = '#F97316', ARROW_SHADE = '#9A3412'; // filament orange, the site's accent
+// Family look shared with uploadmycode and uploadmylaser: a grey robot face on a deep tile of the site's
+// colour, wearing an upload arrow in a brighter tint of that colour. uploadmymodel's colour is filament orange.
+const BG = '#9A3412', FACE = '#AEB6C0', FLOOR = '#7B2A0E'; // FLOOR: the cube's shadow on BG
+const WHITE = '#FFFFFF', DARK = '#0F3D40';
+const ARROW = '#FB923C', ARROW_SHADE = '#C2410C'; // the site's dark and light accents
 
 // View angle. YAW turns the cube so its right side shows; PITCH tips its top toward us.
 const YAW = (-32 * Math.PI) / 180, PITCH = (22 * Math.PI) / 180;
@@ -45,7 +48,7 @@ const facing = ([nx, ny, nz]) => ny * Math.sin(PITCH) + (-nx * Math.sin(YAW) + n
 
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const mix = (a, b, t) => '#' + hex(a).map((v, i) => Math.round(v + (hex(b)[i] - v) * t).toString(16).padStart(2, '0')).join('').toUpperCase();
-// Lambert shading, scaled so a face pointing straight at us gets exactly `base` (the white face stays white).
+// Lambert shading, scaled so a face pointing straight at us gets exactly `base` (the front face is exactly FACE).
 const bright = (n) => AMBIENT + (1 - AMBIENT) * Math.max(0, n[0] * LIGHT[0] + n[1] * LIGHT[1] + n[2] * LIGHT[2]);
 const lit = (base, shade, n) => mix(shade, base, Math.min(1, bright(n) / bright([0, 0, 1])));
 
@@ -87,7 +90,7 @@ const front = (u, v) => [u, v, 1], right = (u, v) => [1, v, -u], top = (u, v) =>
 
 // ---------- the drawing, back to front ----------
 const shapes = [];
-shapes.push({ svg: `<rect x="0" y="0" width="64" height="64" rx="14" fill="${TEAL}"/>`, fill: TEAL, inside: (px, py) => {
+shapes.push({ svg: `<rect x="0" y="0" width="64" height="64" rx="14" fill="${BG}"/>`, fill: BG, inside: (px, py) => {
   const r = 14, cx = Math.min(Math.max(px, r), 64 - r), cy = Math.min(Math.max(py, r), 64 - r);
   return px >= 0 && py >= 0 && px <= 64 && py <= 64 && (px - cx) ** 2 + (py - cy) ** 2 <= r * r;
 } });
@@ -99,10 +102,10 @@ const cubeFaces = [
 ];
 for (const { n, at } of cubeFaces) {
   if (!facing(n)) continue;
-  shapes.push(poly([P(at(-1, -1)), P(at(1, -1)), P(at(1, 1)), P(at(-1, 1))], lit(WHITE, TEAL, n)));
+  shapes.push(poly([P(at(-1, -1)), P(at(1, -1)), P(at(1, 1)), P(at(-1, 1))], lit(FACE, BG, n)));
 }
 // Print layer lines on the side, so it reads as a 3D-printed part.
-const sideLines = mix(TEAL, lit(WHITE, TEAL, [1, 0, 0]), 0.8);
+const sideLines = mix(BG, lit(FACE, BG, [1, 0, 0]), 0.8);
 for (let v = -0.7; v <= 0.71; v += 0.35) shapes.push(stroke([P(right(-0.96, v)), P(right(0.96, v))], 0.55, sideLines));
 
 // Face, on the front: uploadmycode's eyes and smile.
@@ -115,7 +118,7 @@ shapes.push(stroke(bend(front, [-0.36, -0.3], [0, -0.7], [0.36, -0.3]), 2.6, DAR
 const zf = DEPTH / 2, zb = -DEPTH / 2, sides = [];
 const CAST_X = 0.3, CAST_Z = -0.42;
 shapes.push(poly([[-SHAFT, zf], [SHAFT, zf], [SHAFT + CAST_X, zf + CAST_Z], [SHAFT + CAST_X, zb + CAST_Z], [-SHAFT + CAST_X, zb + CAST_Z], [-SHAFT, zb]]
-  .map(([x, z]) => P([x, 1, z])), mix(lit(WHITE, TEAL, [0, 1, 0]), TEAL, 0.3)));
+  .map(([x, z]) => P([x, 1, z])), mix(lit(FACE, BG, [0, 1, 0]), BG, 0.3)));
 for (let i = 0; i < arrowOutline.length; i++) {
   const [ax, ay] = arrowOutline[i], [bx, by] = arrowOutline[(i + 1) % arrowOutline.length];
   const len = Math.hypot(bx - ax, by - ay), n = [(by - ay) / len, -(bx - ax) / len, 0]; // outline runs counter-clockwise
