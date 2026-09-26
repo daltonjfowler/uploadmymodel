@@ -25,8 +25,12 @@ onThemeChange(() => viewer.setTheme(isDark() ? 'dark' : 'light'));
 
 // ---- Toasts -----------------------------------------------------------------------------------
 
-function toast(message, { kind = 'info', action, actionLabel, timeout = 6000 } = {}) {
-  const t = el('div', { class: `toast ${kind}`, role: kind === 'error' ? 'alert' : 'status' });
+// `key`: a new toast with the same key replaces the old one (so ten quick Undos show one toast).
+function toast(message, { kind = 'info', action, actionLabel, timeout = 6000, key } = {}) {
+  const box = $('#toasts');
+  if (key) box.querySelector(`[data-key="${key}"]`)?.remove();
+  while (box.children.length >= 3) box.firstElementChild.remove();
+  const t = el('div', { class: `toast ${kind}`, role: kind === 'error' ? 'alert' : 'status', 'data-key': key });
   t.append(el('span', {}, message));
   if (action) {
     const b = el('button', { type: 'button', class: 'toast-action' }, actionLabel);
@@ -39,7 +43,7 @@ function toast(message, { kind = 'info', action, actionLabel, timeout = 6000 } =
   const x = el('button', { type: 'button', class: 'toast-x', 'aria-label': 'Close' }, '×');
   x.addEventListener('click', () => t.remove());
   t.append(x);
-  $('#toasts').append(t);
+  box.append(t);
   if (timeout) setTimeout(() => t.remove(), timeout);
 }
 
@@ -104,11 +108,10 @@ function checkUnits(model) {
   const biggest = Math.max(s.x, s.y, s.z);
   if (biggest < 8) {
     toast(`"${model.name}" is tiny (${fmt(biggest, 1)} mm). Was it made in inches?`, {
-      action: () => {
+      action: () => viewer.transaction('inches to mm', () => {
         viewer.setScale(model, 2540, 2540, 2540);
-        viewer.placeFree(model);
-        viewer.changed();
-      },
+        viewer.moveToFreeSpot(model);
+      }),
       actionLabel: 'Make it ×25.4',
       timeout: 15000,
     });
@@ -154,6 +157,25 @@ for (const b of document.querySelectorAll('.tool[data-tool]')) {
   b.addEventListener('click', () => setTool(b.dataset.tool));
 }
 $('#dupBtn').addEventListener('click', () => viewer.duplicate(viewer.selected));
+
+// ---- Undo / redo ------------------------------------------------------------------------------
+
+function undo() {
+  const label = viewer.undo();
+  if (label) toast(`Undid: ${label}`, { timeout: 2200, key: 'history' });
+}
+
+function redo() {
+  const label = viewer.redo();
+  if (label) toast(`Redid: ${label}`, { timeout: 2200, key: 'history' });
+}
+
+$('#undoBtn').addEventListener('click', undo);
+$('#redoBtn').addEventListener('click', redo);
+viewer.addEventListener('history', () => {
+  $('#undoBtn').disabled = !viewer.canUndo;
+  $('#redoBtn').disabled = !viewer.canRedo;
+});
 $('#delBtn').addEventListener('click', () => viewer.remove(viewer.selected));
 
 function numberField(label, value, onCommit, { unit = 'mm', step = 1, min, disabled = false, digits = 1 } = {}) {
@@ -300,7 +322,7 @@ $('#clearPlate').addEventListener('click', () => {
   if (!viewer.models.length) return;
   const removed = viewer.models.length;
   viewer.clear();
-  toast(`Cleared ${removed} object${removed === 1 ? '' : 's'}.`);
+  toast(`Cleared ${removed} object${removed === 1 ? '' : 's'}.`, { action: undo, actionLabel: 'Undo', key: 'history' });
 });
 
 function renderObjects() {
@@ -521,7 +543,14 @@ window.addEventListener('keydown', (e) => {
   }
   if (typing || document.querySelector('dialog[open]')) return;
   const m = viewer.selected;
-  if (ctrl && e.key.toLowerCase() === 'd') {
+  const key = e.key.toLowerCase();
+  if (ctrl && key === 'z' && !e.shiftKey) {
+    e.preventDefault();
+    undo();
+  } else if (ctrl && (key === 'y' || (key === 'z' && e.shiftKey))) {
+    e.preventDefault();
+    redo();
+  } else if (ctrl && key === 'd') {
     e.preventDefault();
     viewer.duplicate(m);
   } else if (ctrl && e.key.toLowerCase() === 'r') {
@@ -534,6 +563,13 @@ window.addEventListener('keydown', (e) => {
   } else if (e.key === 'Escape') {
     if (viewer.layFlatPicking) viewer.startLayFlatPick(false);
     else viewer.select(null);
+  } else if (e.key.startsWith('Arrow') && m) {
+    // Nudge like Cura: 1 mm, or 10 mm with Shift. Up is toward the back of the bed.
+    e.preventDefault();
+    const step = e.shiftKey ? 10 : 1;
+    const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
+    viewer.nudge(m, d[0], d[1]);
+    syncToolPanel();
   } else if (e.key === 't' || e.key === 'T') setTool('move');
   else if (e.key === 's' || e.key === 'S') setTool('scale');
   else if (e.key === 'r' || e.key === 'R') setTool('rotate');

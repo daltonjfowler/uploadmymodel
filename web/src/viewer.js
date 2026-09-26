@@ -116,6 +116,9 @@ export class Viewer extends EventTarget {
     this.printer = printer;
     this.models = [];
     this.selected = null;
+    this.undoStack = [];
+    this.redoStack = [];
+    this.pending = null;
     this.layFlatPicking = false;
     this.overhangCos = Math.cos(THREE.MathUtils.degToRad(90 - printer.supportAngleDeg));
     this.themeName = 'light';
@@ -323,29 +326,107 @@ export class Viewer extends EventTarget {
     this.emit('change');
   }
 
+  // ---- Undo / redo ----------------------------------------------------------------------------
+  // Every change to the plate records how to undo and redo itself. Turns are undone with the
+  // inverse turn (the shape comes back exactly; only its centring is redone), so big models do not
+  // need a copy per step. Removed models stay alive in the history so Undo can bring them back.
+
+  record(entry) {
+    if (this.pending) {
+      this.pending.push(entry);
+      return;
+    }
+    this.undoStack.push(entry);
+    if (this.undoStack.length > 60) this.undoStack.shift();
+    this.redoStack = [];
+    this.emit('history');
+  }
+
+  /** Run fn so that everything it changes is one Undo step. */
+  transaction(label, fn) {
+    if (this.pending) return fn();
+    this.pending = [];
+    try {
+      return fn();
+    } finally {
+      const list = this.pending;
+      this.pending = null;
+      if (list.length === 1) this.record(list[0]);
+      else if (list.length) {
+        this.record({
+          label,
+          undo: () => [...list].reverse().forEach((e) => e.undo()),
+          redo: () => list.forEach((e) => e.redo()),
+        });
+      }
+    }
+  }
+
+  get canUndo() {
+    return this.undoStack.length > 0;
+  }
+
+  get canRedo() {
+    return this.redoStack.length > 0;
+  }
+
+  undo() {
+    const e = this.undoStack.pop();
+    if (!e) return null;
+    e.undo();
+    this.redoStack.push(e);
+    this.changed();
+    this.emit('history');
+    return e.label;
+  }
+
+  redo() {
+    const e = this.redoStack.pop();
+    if (!e) return null;
+    e.redo();
+    this.undoStack.push(e);
+    this.changed();
+    this.emit('history');
+    return e.label;
+  }
+
+  attach(model, index = this.models.length) {
+    this.models.splice(index, 0, model);
+    this.scene.add(model.mesh);
+    this.select(model);
+  }
+
+  detach(model) {
+    const index = this.models.indexOf(model);
+    if (index < 0) return -1;
+    this.scene.remove(model.mesh);
+    this.models.splice(index, 1);
+    if (this.selected === model) this.select(null);
+    return index;
+  }
+
   addModel(name, positions) {
     const model = new Model(name, positions);
     this.paint(model);
-    this.models.push(model);
-    this.scene.add(model.mesh);
     this.placeFree(model);
-    this.select(model);
+    this.attach(model);
+    this.record({ label: `add ${name}`, undo: () => this.detach(model), redo: () => this.attach(model) });
     this.changed();
     return model;
   }
 
   remove(model) {
     if (!model) return;
-    this.scene.remove(model.mesh);
-    model.geometry.dispose();
-    model.material.dispose();
-    this.models = this.models.filter((m) => m !== model);
-    if (this.selected === model) this.select(null);
+    const index = this.detach(model);
+    if (index < 0) return;
+    this.record({ label: `delete ${model.name}`, undo: () => this.attach(model, index), redo: () => this.detach(model) });
     this.changed();
   }
 
   clear() {
-    for (const m of [...this.models]) this.remove(m);
+    this.transaction('clear the plate', () => {
+      for (const m of [...this.models]) this.remove(m);
+    });
   }
 
   duplicate(model) {
@@ -353,11 +434,11 @@ export class Viewer extends EventTarget {
     const copy = new Model(model.name, model.geometry.attributes.position.array.slice());
     copy.original = model.original.slice();
     copy.mesh.scale.copy(model.mesh.scale);
+    copy.position.copy(model.position);
     this.paint(copy);
-    this.models.push(copy);
-    this.scene.add(copy.mesh);
     this.placeFree(copy);
-    this.select(copy);
+    this.attach(copy);
+    this.record({ label: `copy ${model.name}`, undo: () => this.detach(copy), redo: () => this.attach(copy) });
     this.changed();
     return copy;
   }
@@ -462,9 +543,19 @@ export class Viewer extends EventTarget {
     model.position.set(0, 0, 0);
   }
 
+  /** placeFree, as one recorded move (for changes after the model is already on the plate). */
+  moveToFreeSpot(model) {
+    const start = model.position.clone();
+    this.placeFree(model);
+    const { x, y } = model.position;
+    model.position.copy(start);
+    this.setPosition(model, x, y);
+  }
+
   /** Tidy every model into rows, biggest first, centred on the bed. */
   arrangeAll() {
     if (!this.models.length) return;
+    const before = this.models.map((m) => [m, m.position.x, m.position.y]);
     const gap = 8;
     const lim = this.limits();
     const items = [...this.models].sort((a, b) => b.size.x * b.size.y - a.size.x * a.size.y);
@@ -492,18 +583,50 @@ export class Viewer extends EventTarget {
       }
       y -= r.depth + gap;
     }
+    const after = this.models.map((m) => [m, m.position.x, m.position.y]);
+    const put = (list) => list.forEach(([m, px, py]) => m.position.set(px, py, 0));
+    this.record({ label: 'arrange', undo: () => put(before), redo: () => put(after) });
     this.changed();
   }
 
   setPosition(model, x, y) {
+    const ox = model.position.x;
+    const oy = model.position.y;
+    if (ox === x && oy === y) return;
     model.position.set(x, y, 0);
+    this.record({ label: 'move', undo: () => model.position.set(ox, oy, 0), redo: () => model.position.set(x, y, 0) });
     this.changed();
+  }
+
+  /** Move by a few mm (arrow keys). */
+  nudge(model, dx, dy) {
+    if (!model) return;
+    const r = (v) => Math.round(v * 10) / 10;
+    this.setPosition(model, r(model.position.x + dx), r(model.position.y + dy));
   }
 
   /** Scale in percent per axis (100 = as loaded). */
   setScale(model, sx, sy, sz) {
-    model.mesh.scale.set(sx / 100, sy / 100, sz / 100);
-    this.paint(model);
+    const before = model.mesh.scale.clone();
+    const after = new THREE.Vector3(sx / 100, sy / 100, sz / 100);
+    const put = (v) => {
+      model.mesh.scale.copy(v);
+      this.paint(model);
+    };
+    put(after);
+    this.record({ label: 'scale', undo: () => put(before), redo: () => put(after) });
+    this.changed();
+  }
+
+  // Bake a turn or mirror into the model, recorded for Undo as its inverse.
+  turn(model, matrix, label) {
+    const inverse = matrix.clone().invert();
+    const apply = (m) => {
+      bake(model, m);
+      this.paint(model);
+    };
+    apply(matrix);
+    this.record({ label, undo: () => apply(inverse), redo: () => apply(matrix) });
     this.changed();
   }
 
@@ -515,24 +638,25 @@ export class Viewer extends EventTarget {
     else m.makeRotationZ(r);
     // Scale is along the printer's axes, so turning a squashed model keeps it squashed along the
     // same printer axis. Uniform scale (the usual case) is unaffected.
-    bake(model, m);
-    this.paint(model);
-    this.changed();
+    this.turn(model, m, 'turn');
   }
 
   mirror(model, axis) {
     const m = new THREE.Matrix4().makeScale(axis === 'x' ? -1 : 1, axis === 'y' ? -1 : 1, axis === 'z' ? -1 : 1);
-    bake(model, m);
-    this.paint(model);
-    this.changed();
+    this.turn(model, m, 'mirror');
   }
 
   /** Back to how the file loaded: turns and mirrors undone. Scale and position kept. */
   resetTurns(model) {
-    const g = model.geometry;
-    g.attributes.position.array.set(model.original);
-    normalize(model);
-    this.paint(model);
+    const arr = model.geometry.attributes.position.array;
+    const before = arr.slice();
+    const put = (src) => {
+      arr.set(src);
+      normalize(model);
+      this.paint(model);
+    };
+    put(model.original);
+    this.record({ label: 'undo turns', undo: () => put(before), redo: () => put(model.original) });
     this.changed();
   }
 
@@ -540,9 +664,7 @@ export class Viewer extends EventTarget {
   pointDown(model, normal) {
     const n = normal.clone().normalize();
     const q = new THREE.Quaternion().setFromUnitVectors(n, new THREE.Vector3(0, 0, -1));
-    bake(model, new THREE.Matrix4().makeRotationFromQuaternion(q));
-    this.paint(model);
-    this.changed();
+    this.turn(model, new THREE.Matrix4().makeRotationFromQuaternion(q), 'lay flat');
   }
 
   /**
@@ -587,8 +709,10 @@ export class Viewer extends EventTarget {
     const lim = this.limits();
     const f = Math.min((lim.x * 2) / s.x, (lim.y * 2) / s.y, this.printer.bed.z / s.z, 1) * 0.98;
     const sc = model.mesh.scale;
-    this.setScale(model, sc.x * f * 100, sc.y * f * 100, sc.z * f * 100);
-    this.setPosition(model, 0, 0);
+    this.transaction('fit to bed', () => {
+      this.setScale(model, sc.x * f * 100, sc.y * f * 100, sc.z * f * 100);
+      this.setPosition(model, 0, 0);
+    });
   }
 
   frameSelection() {
@@ -644,6 +768,7 @@ export class Viewer extends EventTarget {
     if (!ground) return;
     this.drag = {
       model: hit.model,
+      start: hit.model.position.clone(),
       z: hit.point.z,
       offset: new THREE.Vector2(hit.model.position.x - ground.x, hit.model.position.y - ground.y),
       moved: false,
@@ -679,11 +804,16 @@ export class Viewer extends EventTarget {
 
   onPointerUp(e) {
     if (this.drag) {
-      const moved = this.drag.moved;
+      const { moved, model, start } = this.drag;
       this.drag = null;
       this.canvas.style.cursor = 'grab';
       if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
-      if (moved) this.changed();
+      if (moved) {
+        // One Undo step for the whole drag.
+        const { x, y } = model.position;
+        model.position.copy(start);
+        this.setPosition(model, x, y);
+      }
       return;
     }
     // A click (not a camera drag) on empty space clears the selection.

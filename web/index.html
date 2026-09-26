@@ -38,6 +38,10 @@
         <span aria-hidden="true">📂</span> Open model
       </button>
       <input id="fileInput" type="file" multiple hidden>
+      <span class="history card">
+        <button id="undoBtn" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button>
+        <button id="redoBtn" type="button" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>↷</button>
+      </span>
     </div>
 
     <div class="tools" role="toolbar" aria-label="Model tools" aria-orientation="vertical">
@@ -121,7 +125,9 @@
         <tr><td>Zoom</td><td>Mouse wheel, or two fingers on the touchpad</td></tr>
         <tr><td>Move a model</td><td>Drag it</td></tr>
         <tr><td>Tools</td><td><kbd>T</kbd> move · <kbd>S</kbd> scale · <kbd>R</kbd> rotate · <kbd>M</kbd> mirror</td></tr>
+        <tr><td>Nudge a model</td><td>Arrow keys (1 mm), Shift + arrows (10 mm)</td></tr>
         <tr><td>Copy / delete</td><td><kbd>Ctrl</kbd>+<kbd>D</kbd> · <kbd>Delete</kbd></td></tr>
+        <tr><td>Undo / redo</td><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> · <kbd>Ctrl</kbd>+<kbd>Y</kbd></td></tr>
       </table>
       <p class="note">Nothing leaves this Chromebook until you press Slice. Models are sliced and forgotten, never saved.</p>
       <div class="dialog-actions"><button class="primary" value="close">Got it</button></div>
