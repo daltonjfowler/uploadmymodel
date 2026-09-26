@@ -3,7 +3,7 @@
 // teacher's locked settings greyed out). Both tabs edit the same settings object.
 
 import {
-  ADHESION_CHOICES, DEFAULT_CLASS_CONFIG, INFILL_PATTERNS, QUALITIES, SECTIONS, SETTINGS, SIMPLE_ADHESION, lockedRows,
+  ADHESION_CHOICES, DEFAULT_CLASS_CONFIG, INFILL_PATTERNS, QUALITIES, SECTIONS, SETTINGS, SIMPLE_ADHESION, SIMPLE_QUALITIES, lockedRows,
   SUPPORT_CHOICES, TREE_SUPPORT_INFILL, applyClassLocks, isClassDefault, qualityById, summarize,
   validateClassConfig, validateSettings,
 } from '../../shared/settings.js';
@@ -15,6 +15,10 @@ import { patternIcon } from './pattern-icons.js';
 const STORE_SETTINGS = 'umm.mySettings';
 const STORE_MODE = 'umm.settingsMode';
 const STORE_OPEN = 'umm.settingsOpen';
+// Support advice thresholds, mm² of red (faces needing support) on the plate: under `none` counts
+// as nothing (specks), under `tiny` prints fine without supports (a small tip, the top of a hole),
+// from `lots` on, turning the model is worth a try.
+const SUPPORT_RED = { none: 5, tiny: 25, lots: 1500 };
 
 function load(key, fallback) {
   try {
@@ -129,12 +133,17 @@ export class SettingsPanel extends EventTarget {
     this.dispatchEvent(new Event('change'));
   }
 
-  /** The viewer tells us how much of the plate hangs in the air, for the support advice. */
-  setPlateInfo({ overhangs, hasModels }) {
-    const was = `${this.overhangs > 25}|${this.hasModels}`;
-    this.overhangs = overhangs;
-    this.hasModels = hasModels;
-    if (was !== `${this.overhangs > 25}|${this.hasModels}`) this.render();
+  /**
+   * The viewer tells us how much of the plate hangs in the air (mm² of red), and how much of that
+   * is over the model rather than over the bed (overModel; null = not worked out yet), for the
+   * support advice. Only re-renders when the advice would change.
+   */
+  setPlateInfo(info) {
+    const was = this.adviceKind();
+    if ('overhangs' in info) this.overhangs = info.overhangs;
+    if ('overModel' in info) this.overModel = info.overModel;
+    if ('hasModels' in info) this.hasModels = info.hasModels;
+    if (was !== this.adviceKind()) this.render();
   }
 
   // ---- Rendering ----------------------------------------------------------------------------
@@ -207,11 +216,12 @@ export class SettingsPanel extends EventTarget {
     const s = this.settings;
     const q = qualityById(s.quality);
 
-    // Print quality: three big buttons, like picking a Cura profile.
+    // Print quality: big buttons, like picking a Cura profile. Fast and Standard here; Fine detail
+    // lives in Custom (if a student picked it there, it shows here too).
     const quality = this.block(body, 'Print quality', defOf('quality'));
     if (this.isLocked('quality')) quality.append(this.lockedLine('quality'));
     const seg = el('div', { class: 'seg quality' });
-    for (const opt of QUALITIES) {
+    for (const opt of QUALITIES.filter((o) => SIMPLE_QUALITIES.includes(o.id) || o.id === s.quality)) {
       const b = el('button', { type: 'button', class: s.quality === opt.id ? 'on' : '' });
       b.innerHTML = `<strong>${esc(opt.label)}</strong><small>${opt.layerMm.toFixed(2)} mm</small>`;
       b.addEventListener('click', () => this.set('quality', opt.id));
@@ -227,6 +237,9 @@ export class SettingsPanel extends EventTarget {
     // Supports: on/off, then where they may grow and from what angle.
     const support = this.block(body, 'Support', defOf('support'));
     support.append(this.isLocked('support') ? this.lockedLine('support') : this.supportToggle());
+    // Right under the switch, so it is seen without scrolling: do I need supports?
+    const advice = this.supportAdvice();
+    if (advice) support.append(advice);
     if (s.support !== 'none') {
       if (!this.isLocked('support')) support.append(this.placementPicker());
       if (this.isLocked('supportAngle')) support.append(this.lockedLine('supportAngle'));
@@ -238,8 +251,6 @@ export class SettingsPanel extends EventTarget {
         support.append(angle);
       }
     }
-    const advice = this.supportAdvice();
-    if (advice) support.append(advice);
 
     // Adhesion: Skirt | Brim (Raft and None live in Custom; if one is picked there, it shows here too).
     const adhesion = this.block(body, 'Adhesion', defOf('adhesion'));
@@ -458,16 +469,69 @@ export class SettingsPanel extends EventTarget {
     return row;
   }
 
-  supportAdvice() {
+  // ---- Do I need supports? ------------------------------------------------------------------
+  // Red on the model = hangs in the air past the support angle (viewer.js paint). A few mm² of red
+  // (a tiny tip, the edge of a hole) prints fine without supports; a red face with the model under
+  // it cannot be reached by supports that only grow from the bed (viewer.js checkSupport).
+
+  /** Which piece of advice fits the plate and the support setting now (null = none). */
+  adviceKind() {
     if (!this.hasModels) return null;
-    const off = this.settings.support === 'none';
-    if (off && this.overhangs > 25) {
-      return el('p', { class: 'advice warn' }, 'Your model has red parts hanging in the air (click Below, bottom left, to see them). Turn on tree supports, or turn the model so less is red.');
+    const red = this.overhangs;
+    const level = red < SUPPORT_RED.none ? 'none' : red < SUPPORT_RED.tiny ? 'tiny' : 'some';
+    // Over the model: a real share of the red, and more than a tiny bit.
+    const over = this.overModel == null ? null
+      : this.overModel >= SUPPORT_RED.tiny && this.overModel >= red * 0.15;
+    const support = this.settings.support;
+    if (support === 'none') {
+      if (level === 'some') return over ? 'off-need-everywhere' : 'off-need';
+      return level === 'tiny' ? 'off-tiny' : 'off-none';
     }
-    if (!off && this.overhangs <= 25) {
-      return el('p', { class: 'advice ok' }, 'Nothing on your plate is red, so it may not need supports. Turning them off saves plastic.');
+    if (level !== 'some') return `on-${level}`;
+    if (support === 'buildplate') {
+      if (over) return 'plate-cannot-reach';
+      return red >= SUPPORT_RED.lots ? 'on-lots' : 'on-good';
     }
-    return null;
+    if (over === false) return 'everywhere-not-needed';
+    return 'everywhere-good';
+  }
+
+  supportAdvice() {
+    const kind = this.adviceKind();
+    if (!kind) return null;
+    const locked = this.isLocked('support');
+    const turnOn = { label: 'Turn on tree supports', run: () => this.set('support', this.lastPlacement ?? 'buildplate') };
+    const turnOff = { label: 'Turn supports off', run: () => this.set('support', 'none') };
+    const everywhere = { label: 'Use Everywhere', run: () => this.set('support', 'everywhere') };
+    const plate = { label: 'Use Touching build plate', run: () => this.set('support', 'buildplate') };
+    const show = { label: 'Show me the red', run: () => this.dispatchEvent(new Event('showred')), quiet: true };
+    const advice = {
+      'off-need': ['warn', 'Red parts hang in the air. Without supports they droop or fall. Turn on supports, or turn your model so less is red.', [turnOn, show]],
+      'off-need-everywhere': ['warn', 'Red parts hang in the air, some above your model, not the bed. Turn on supports Everywhere so they can reach.', [everywhere, show]],
+      'off-tiny': ['ok', 'Only a tiny bit is red. Small overhangs like that usually print fine without supports.', [show]],
+      'off-none': ['ok', 'Nothing hangs in the air, so no supports needed.', []],
+      'on-none': ['ok', 'Nothing on your model is red, so it does not need supports. Turn them off to save plastic and time.', [turnOff]],
+      'on-tiny': ['ok', 'Only a tiny bit is red. It will probably print fine without supports, and save plastic.', [turnOff, show]],
+      'on-good': ['ok', 'Good: tree supports will hold up the red parts.', [show]],
+      'on-lots': ['ok', 'Good: tree supports will hold up the red parts. A lot is red, though. Turning your model (Rotate, then Biggest flat side down) might need fewer supports and print faster.', [show]],
+      'plate-cannot-reach': ['warn', 'Some red parts are above your model, not the bed (like inside an arch). Supports from the bed cannot reach them. Pick Everywhere.', [everywhere, show]],
+      'everywhere-not-needed': ['ok', 'Every red part is above the bed, so Touching build plate is enough. Those supports are easier to clean off.', [plate]],
+      'everywhere-good': ['ok', 'Good: supports can grow from your model to reach the red parts above it.', [show]],
+    }[kind];
+    const [tone, text, actions] = advice;
+    const box = el('div', { class: `advice ${tone}` });
+    box.append(el('p', {}, locked ? `${text} (Your teacher sets supports.)` : text));
+    const shown = actions.filter((a) => a.quiet || !locked);
+    if (shown.length) {
+      const row = el('div', { class: 'advice-actions' });
+      for (const a of shown) {
+        const b = el('button', { type: 'button', class: a.quiet ? 'linkbtn' : '' }, a.label);
+        b.addEventListener('click', a.run);
+        row.append(b);
+      }
+      box.append(row);
+    }
+    return box;
   }
 
   block(body, title, def) {

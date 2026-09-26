@@ -30,6 +30,14 @@ const OVERHANG_COLOR = new THREE.Color('#e5484d');
 const OUTSIDE_TINT = new THREE.Color('#7d848f');
 // Faces touching the bed never need support, even when they face down.
 const ON_BED_MM = 0.3;
+// Red faces the support check looks under (a sample, by area, on big models).
+const SUPPORT_SAMPLES = 1500;
+// Points spread over a triangle (barycentric weights), the centre first; a big red face uses the
+// first n of them.
+const SPREAD = [[1 / 3, 1 / 3, 1 / 3]];
+for (let i = 1; i < 6; i++) {
+  for (let j = 1; i + j < 6; j++) SPREAD.push([i / 6, j / 6, (6 - i - j) / 6]);
+}
 
 const THEMES = {
   light: { bg: '#e8ecf1', plate: '#cfd5dc', margin: '#bcc3cc', minor: '#b8bfc8', major: '#98a1ac', volume: '#8d97a3', text: '#6b7480' },
@@ -512,6 +520,7 @@ export class Viewer extends EventTarget {
     this.updateSelectionBox();
     this.updateRings();
     this.scheduleTrees();
+    this.scheduleSupportCheck();
     this.requestRender();
     this.emit('change');
   }
@@ -528,6 +537,7 @@ export class Viewer extends EventTarget {
         return;
       }
       m.geometry.computeBoundsTree();
+      if (!this.models.some(wantsTree)) this.scheduleSupportCheck(); // all trees ready: check now
       this.scheduleTrees();
     }, { timeout: 2000 });
   }
@@ -820,21 +830,88 @@ export class Viewer extends EventTarget {
     const s = model.mesh.scale;
     let area = 0;
     for (let i = 0; i < p.length; i += 9) {
-      const ax = p[i] * s.x, ay = p[i + 1] * s.y, az = p[i + 2] * s.z;
-      const ux = p[i + 3] * s.x - ax, uy = p[i + 4] * s.y - ay, uz = p[i + 5] * s.z - az;
-      const vx = p[i + 6] * s.x - ax, vy = p[i + 7] * s.y - ay, vz = p[i + 8] * s.z - az;
-      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-      const len = Math.hypot(nx, ny, nz) || 1;
-      const minZ = Math.min(az, p[i + 5] * s.z, p[i + 8] * s.z);
-      const overhang = nz / len < -this.overhangCos && minZ > ON_BED_MM;
-      if (overhang) area += len / 2;
-      const col = overhang ? OVERHANG_COLOR : MODEL_COLOR;
+      const a = this.overhangArea(p, i, s);
+      area += a;
+      const col = a ? OVERHANG_COLOR : MODEL_COLOR;
       for (let k = 0; k < 9; k += 3) {
         c[i + k] = col.r; c[i + k + 1] = col.g; c[i + k + 2] = col.b;
       }
     }
     model.overhangArea = area;
     model.geometry.attributes.color.needsUpdate = true;
+  }
+
+  // ---- Support check (for the advice in the settings panel) ---------------------------------
+  // Red faces need support. Tree supports "touching build plate" can only grow straight up from the
+  // bed, so a red face with the model (or another model) under it, like the inside of an arch or
+  // under a chin over a body, cannot be reached: it needs supports "everywhere". Found by a ray
+  // straight down from red faces (up to SUPPORT_SAMPLES of them, by area). Runs when the browser
+  // is idle after a change, and only once every model has its search tree (otherwise too slow);
+  // emits 'supportinfo' { red, overModel } in mm², or overModel null when not known yet.
+
+  scheduleSupportCheck() {
+    clearTimeout(this.supportTimer);
+    this.supportTimer = setTimeout(() => idle(() => this.checkSupport(), { timeout: 2000 }), 250);
+  }
+
+  checkSupport() {
+    if (this.drag || this.ringDrag) return this.scheduleSupportCheck();
+    const red = this.models.reduce((a, m) => a + m.overhangArea, 0);
+    const ready = this.models.every((m) => m.geometry.boundsTree || m.triangles <= 5000);
+    if (!red || !ready) {
+      this.emit('supportinfo', { red, overModel: red ? null : 0 });
+      return;
+    }
+    this.scene.updateMatrixWorld();
+    const meshes = this.models.map((m) => m.mesh);
+    // Points on the red faces, [x, y, z, area each stands for] in plate mm. A big face (CAD models
+    // have huge flat triangles) gets several points spread over it, about one per 16 mm².
+    const faces = [];
+    for (const m of this.models) {
+      const p = m.geometry.attributes.position.array;
+      const s = m.mesh.scale;
+      const o = m.position;
+      for (let i = 0; i < p.length; i += 9) {
+        const area = this.overhangArea(p, i, s);
+        if (!area) continue;
+        const n = Math.min(SPREAD.length, Math.ceil(area / 16));
+        for (let k = 0; k < n; k++) {
+          const [a, b, c] = SPREAD[k];
+          faces.push([
+            o.x + (a * p[i] + b * p[i + 3] + c * p[i + 6]) * s.x,
+            o.y + (a * p[i + 1] + b * p[i + 4] + c * p[i + 7]) * s.y,
+            (a * p[i + 2] + b * p[i + 5] + c * p[i + 8]) * s.z,
+            area / n,
+          ]);
+        }
+      }
+    }
+    const step = Math.max(1, Math.ceil(faces.length / SUPPORT_SAMPLES));
+    const down = new THREE.Vector3(0, 0, -1);
+    const from = new THREE.Vector3();
+    let sampled = 0, blocked = 0;
+    this.raycaster.firstHitOnly = true;
+    for (let k = 0; k < faces.length; k += step) {
+      const [x, y, z, area] = faces[k];
+      sampled += area;
+      from.set(x, y, z - 0.05);
+      this.raycaster.set(from, down);
+      this.raycaster.far = Math.max(0, z - ON_BED_MM);
+      if (this.raycaster.intersectObjects(meshes, false).length) blocked += area;
+    }
+    this.raycaster.far = Infinity;
+    this.emit('supportinfo', { red, overModel: sampled ? (blocked / sampled) * red : 0 });
+  }
+
+  /** Area (mm²) of the triangle at p[i..i+8] if it needs support, else 0. Same test as paint(). */
+  overhangArea(p, i, s) {
+    const ax = p[i] * s.x, ay = p[i + 1] * s.y, az = p[i + 2] * s.z;
+    const ux = p[i + 3] * s.x - ax, uy = p[i + 4] * s.y - ay, uz = p[i + 5] * s.z - az;
+    const vx = p[i + 6] * s.x - ax, vy = p[i + 7] * s.y - ay, vz = p[i + 8] * s.z - az;
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    const minZ = Math.min(az, p[i + 5] * s.z, p[i + 8] * s.z);
+    return nz / len < -this.overhangCos && minZ > ON_BED_MM ? len / 2 : 0;
   }
 
   limits() {
@@ -1051,6 +1128,7 @@ export class Viewer extends EventTarget {
     this.supportAngleDeg = degrees;
     this.overhangCos = Math.cos(THREE.MathUtils.degToRad(90 - degrees));
     for (const m of this.models) this.paint(m);
+    this.scheduleSupportCheck();
     this.requestRender();
   }
 

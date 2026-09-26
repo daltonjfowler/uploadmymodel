@@ -48,7 +48,7 @@ await student.goto(base);
 await student.waitForSelector('.class-note');
 check('note shown', await student.$eval('.class-note', (e) => e.textContent), 'From your teacher: Period 3: under 2 hours please.');
 check('infill locked line', await student.$eval('.locked-line', (e) => e.textContent.trim()), '🔒 Infill density15%');
-check('summary uses 15%', await student.$eval('.settings-summary', (e) => e.textContent), '0.18 mm · 15% · Tree support · Skirt');
+check('summary uses 15%', await student.$eval('.settings-summary', (e) => e.textContent), '0.25 mm · 15% · Tree support · Skirt');
 check('tag says class settings', await student.$eval('.profile-tag', (e) => e.textContent), 'Class settings');
 await student.click('.seg.tabs button:nth-child(2)');
 await student.click('text=Walls');

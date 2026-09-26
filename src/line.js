@@ -22,7 +22,7 @@ export const LEASE_MS = 5 * 60_000;
 // A class is 20-30 students; more than this waiting is a runaway page, not a class.
 export const MAX_WAITING = 80;
 // Guess for how long one slice takes, until the line has timed a few (a supported model at
-// Fine detail, the class setting, is ~16 s on the live container).
+// Fine detail is ~16 s on the live container; Standard, the class setting, about 5 s).
 const FIRST_GUESS_S = 15;
 
 export class SliceLine {

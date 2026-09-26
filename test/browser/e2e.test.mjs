@@ -24,7 +24,7 @@ await page.waitForSelector('#previewCard:not([hidden])', { timeout: 120000 });
 console.log(`  (sliced and previewed in ${((Date.now() - t0) / 1000).toFixed(1)} s)`);
 check('in preview', await page.evaluate(() => document.body.dataset.stage), 'preview');
 const layers = await page.evaluate(() => window.umm.viewer.preview.layers.length);
-check('about 40 mm / 0.18 mm layers', layers > 200 && layers < 230, true);
+check('about 40 mm / 0.25 mm layers', layers > 150 && layers < 170, true);
 check('support lines present', await page.evaluate(() => window.umm.viewer.preview.types[4].segments.length > 0), true);
 check('result card', await page.$eval('#action .result strong', (e) => e.textContent), '✓ Ready for the SD card');
 console.log('  summary:', await page.$eval('#action .result p', (e) => e.textContent));
@@ -35,7 +35,7 @@ const path = await download.path();
 const text = readFileSync(path, 'utf8');
 check('starts with Cura header', text.startsWith(';FLAVOR:Marlin'), true);
 check('school start block (G26 probe-fail clear)', /^G26\s+; clear potential 'probe fail' condition/m.test(text), true);
-check('waits for 205 °C before the first layer', /^M109 R205\s+; wait for extruder to reach printing temp/m.test(text), true);
+check('waits for 210 °C before the first layer (Standard profile)', /^M109 R210\s+; wait for extruder to reach printing temp/m.test(text), true);
 check('summary has no garbled characters', !/Â/.test(await page.$eval('#action .result p', (e) => e.textContent)), true);
 // A student slices and closes the tab straight away: the server must shrug it off.
 const quitter = await ctx.newPage();

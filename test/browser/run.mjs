@@ -13,7 +13,7 @@ const base = process.argv[2] || 'http://127.0.0.1:8787/';
 // Prefer UMM_TEACHER_KEY: a key on the command line gets echoed by npm into logs.
 const key = process.env.UMM_TEACHER_KEY || process.argv[3] || 'local-test-key-not-real';
 const live = !/127\.0\.0\.1|localhost/.test(base);
-const tests = ['undo', 'angle', 'multi', 'preview', 'autosave', 'health', 'threemf', 'units', 'split', 'a11y', 'usb', 'teacher', 'fixes', ...(live ? [] : ['e2e', 'limit', 'filename', 'gate'])];
+const tests = ['undo', 'angle', 'multi', 'preview', 'autosave', 'health', 'threemf', 'units', 'split', 'supports', 'a11y', 'usb', 'teacher', 'fixes', ...(live ? [] : ['e2e', 'limit', 'filename', 'gate'])];
 // (e2e, limit, filename and gate slice real models; run them against local dev with the Docker slicer.)
 let failed = 0;
 // Open slicing for the run with a fresh random phrase (the tests get it through the environment),

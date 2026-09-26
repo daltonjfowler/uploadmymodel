@@ -52,7 +52,7 @@ export const QUALITIES = [
     topBottomMm: 1.25,
     nozzleC: 215,
     firstLayerNozzleC: 210,
-    blurb: 'Good balance of speed and looks.',
+    blurb: 'The class setting. Right for most prints: good looks, not too slow.',
   },
   {
     id: 'high_detail',
@@ -63,7 +63,7 @@ export const QUALITIES = [
     topBottomMm: 1.05,
     nozzleC: 210,
     firstLayerNozzleC: 205,
-    blurb: 'Thin layers. Smooth and detailed. Slowest.',
+    blurb: 'Thin layers for small details, like faces or tiny text. Takes much longer.',
   },
 ];
 
@@ -95,16 +95,21 @@ export const ADHESION_CHOICES = [
 // Recommended shows these two as buttons; Custom has all four.
 export const SIMPLE_ADHESION = ['skirt', 'brim'];
 
+// Recommended shows these layer heights; Custom has all three (Fine detail is for the few who need it).
+export const SIMPLE_QUALITIES = ['high_speed', 'standard'];
+
 export const WALL_CHOICES = [
   { id: 2, label: '2 walls (1.0 mm)', blurb: 'The class default.' },
   { id: 3, label: '3 walls (1.5 mm)', blurb: 'Tougher outside. Takes a little longer.' },
   { id: 4, label: '4 walls (2.0 mm)', blurb: 'Very tough outside, for parts that get screwed or snapped.' },
 ];
 
-// The class profile, current_lulzbot_9_18: High Detail + tree supports touching the plate + 20%
-// infill. Grid is Cura LE's LulzBot default pattern; skirt and 2 walls come from the profile.
+// The class defaults. From the class profile current_lulzbot_9_18 (tree supports touching the
+// plate, 20% infill, skirt, 2 walls; grid is Cura LE's LulzBot default pattern), except the layer
+// height: LulzBot's Standard profile instead of the class profile's High Detail (Dalton 2026-09-26:
+// most prints do not need fine detail).
 export const CLASS_DEFAULTS = Object.freeze({
-  quality: 'high_detail',
+  quality: 'standard',
   infillDensity: 20,
   infillPattern: 'grid',
   walls: 2,

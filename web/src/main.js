@@ -977,6 +977,9 @@ viewer.addEventListener('dragging', () => {
   syncToolPanel();
   renderObjects();
 });
+// Red parts over the model need supports "everywhere" (viewer.js checkSupport, for the advice).
+viewer.addEventListener('supportinfo', (e) => panel.setPlateInfo({ overhangs: e.detail.red, overModel: e.detail.overModel }));
+panel.addEventListener('showred', () => viewer.setView('below'));
 viewer.addEventListener('layflatpick', () => {
   if (tool === 'rotate') renderTools();
 });

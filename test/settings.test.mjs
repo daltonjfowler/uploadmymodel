@@ -5,27 +5,27 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   CLASS_DEFAULTS, INFILL_PATTERNS, PRINTER, SETTINGS, TREE_SUPPORT_INFILL, applyClassLocks, checkAgainstClass, lockedRows,
-  gcodeFileName, safeNamePart, summarize, toCuraOverrides, validateClassConfig, validateSettings,
+  SIMPLE_QUALITIES, gcodeFileName, safeNamePart, summarize, toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
 import { generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
 import { checkPlateSTL } from '../src/worker.js';
 
-test('class defaults match the school profile current_lulzbot_9_18', () => {
+test('class defaults: the school profile current_lulzbot_9_18, but Standard layers (0.25 mm)', () => {
   assert.deepEqual({ ...CLASS_DEFAULTS }, {
-    quality: 'high_detail', infillDensity: 20, infillPattern: 'grid', walls: 2, support: 'buildplate', supportAngle: 60, adhesion: 'skirt',
+    quality: 'standard', infillDensity: 20, infillPattern: 'grid', walls: 2, support: 'buildplate', supportAngle: 60, adhesion: 'skirt',
   });
   assert.equal(CLASS_DEFAULTS.supportAngle, PRINTER.supportAngleDeg);
   assert.equal(validateSettings(CLASS_DEFAULTS).ok, true);
-  assert.equal(summarize(CLASS_DEFAULTS), '0.18 mm · 20% · Tree support · Skirt');
-  assert.equal(summarize({ support: 'everywhere', supportAngle: 45 }), '0.18 mm · 20% · Tree support everywhere 45° · Skirt');
-  assert.equal(summarize({ support: 'none', supportAngle: 45 }), '0.18 mm · 20% · No support · Skirt');
+  assert.equal(summarize(CLASS_DEFAULTS), '0.25 mm · 20% · Tree support · Skirt');
+  assert.equal(summarize({ support: 'everywhere', supportAngle: 45 }), '0.25 mm · 20% · Tree support everywhere 45° · Skirt');
+  assert.equal(summarize({ support: 'none', supportAngle: 45 }), '0.25 mm · 20% · No support · Skirt');
 });
 
 test('missing keys take the class default; unknown keys are dropped', () => {
   const r = validateSettings({ infillDensity: 35, material_print_temperature: 300 });
   assert.equal(r.ok, true);
   assert.equal(r.settings.infillDensity, 35);
-  assert.equal(r.settings.quality, 'high_detail');
+  assert.equal(r.settings.quality, 'standard');
   assert.equal('material_print_temperature' in r.settings, false);
 });
 
@@ -182,4 +182,9 @@ test('class setup: locked settings must match the teacher, open ones may differ'
   assert.equal(fixed.walls, 3);
   assert.equal(fixed.infillDensity, 15);
   assert.equal(fixed.quality, 'standard'); // open: the student's choice stays
+});
+
+test('Recommended shows Fast and Standard; Fine detail is in Custom only', () => {
+  assert.deepEqual(SIMPLE_QUALITIES, ['high_speed', 'standard']);
+  assert.equal('layer_height' in toCuraOverrides({ quality: 'standard' }), false);
 });
