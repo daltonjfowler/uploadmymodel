@@ -531,6 +531,17 @@ function renderAction() {
 
   if (slice.state === 'slicing') {
     card.append(el('div', { class: 'progress', role: 'progressbar', 'aria-label': 'Slicing' }, ''));
+    // Supported models can take a minute on the school's slicer: show that it is still working.
+    const status = el('p', { class: 'note slicing-note' });
+    const tick = () => {
+      const s = Math.round((Date.now() - slice.startedAt) / 1000);
+      const usesSupport = panel.value.support !== 'none';
+      status.textContent = `Slicing… ${s} s.${s >= 8 && usesSupport ? ' Supports take the longest, up to a minute or two.' : ''}`;
+    };
+    tick();
+    clearInterval(slice.timer);
+    slice.timer = setInterval(() => (status.isConnected ? tick() : clearInterval(slice.timer)), 1000);
+    card.append(status);
     const cancel = el('button', { type: 'button', class: 'wide' }, 'Cancel');
     cancel.addEventListener('click', () => sliceAbort?.abort());
     card.append(cancel);
@@ -582,7 +593,7 @@ async function runSlice() {
   form.append('name', studentName());
   form.append('modelName', viewer.models[0].name);
   sliceAbort = new AbortController();
-  slice = { state: 'slicing' };
+  slice = { state: 'slicing', startedAt: Date.now() };
   renderAction();
   try {
     const res = await fetch('/api/slice', { method: 'POST', body: form, signal: sliceAbort.signal });
