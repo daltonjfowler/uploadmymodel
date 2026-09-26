@@ -16,14 +16,16 @@
     { "binding": "CLASS_KV", "id": "348e4cd89f9a4f5da842763149d5d96d" }
   ],
   // TEACHER_KEY is a secret: npx wrangler secret put TEACHER_KEY
-  // The slicer: CuraEngine 4.13.2 in a container (container/README.md). basic = 1/4 vCPU, 1 GiB:
-  // a supported Benchy takes about 80 s there (measured with Docker limits). Sleeps after 5 min.
+  // The slicer: CuraEngine 4.13.2 in a container (container/README.md). 1 vCPU / 3 GiB is the
+  // smallest custom size (Cloudflare needs 3 GiB per vCPU): a supported Benchy in about 16 s, five
+  // times faster than basic (79 s). CPU bills only while slicing; memory while awake. Sleeps
+  // after 5 min without work, and only the teacher's open slicing window lets work in.
   "containers": [
     {
       "class_name": "SlicerContainer",
       "image": "./container/Dockerfile",
       "image_build_context": ".",
-      "instance_type": "basic",
+      "instance_type": { "vcpu": 1, "memory_mib": 3072, "disk_mb": 4000 },
       "max_instances": 2
     }
   ],

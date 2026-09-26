@@ -62,9 +62,14 @@ def slice_file(r, model, out, overrides=None, workdir=None, timeout=None):
     json.dump(flat_def("flat_machine", g, "flat_extruder"), open(os.path.join(workdir, "flat_machine.def.json"), "w"), indent=1)
 
     env = dict(os.environ, CURA_ENGINE_SEARCH_PATH=workdir)
-    cmd = [ENGINE, "slice", "-v", "-j", os.path.join(workdir, "flat_machine.def.json"), "-l", model, "-o", out]
+    # Run next to the model and pass only its file name: the engine writes it into the G-code as
+    # ";MESH:<name>" on every layer (Cura writes the model's file name there too, e.g. 3DBenchy.stl).
+    model = os.path.abspath(model)
+    cmd = [ENGINE, "slice", "-v", "-j", os.path.abspath(os.path.join(workdir, "flat_machine.def.json")),
+           "-l", os.path.basename(model), "-o", os.path.abspath(out)]
+    env["CURA_ENGINE_SEARCH_PATH"] = os.path.abspath(workdir)
     t = time.time()
-    p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
+    p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout, cwd=os.path.dirname(model))
     dt = time.time() - t
     log = p.stdout + p.stderr
     result = {"exit": p.returncode, "seconds": dt, "log": log, "header": None, "filament_mm3": None, "grams": None}

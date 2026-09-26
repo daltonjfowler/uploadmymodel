@@ -14,11 +14,13 @@
 // TEACHER_KEY secret (npx wrangler secret put TEACHER_KEY). No secret set = no teacher access.
 
 import {
-  DEFAULT_CLASS_CONFIG, LIMITS, PRINTER, checkAgainstClass, formatMinutes, gcodeFileName, summarize,
+  DEFAULT_CLASS_CONFIG, LIMITS, PRINTER, checkAgainstClass, formatMinutes, gcodeFileName, safeNamePart, summarize,
   toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
+import { generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
 
 const KV_CLASS = 'class';
+const KV_SLICING = 'slicing'; // { phrase, until } while the teacher has slicing open
 const MAX_TEACHER_BYTES = 4 * 1024;
 const TEACHER_REJECT_DELAY_MS = 300;
 
@@ -113,6 +115,17 @@ async function readClassConfig(env) {
   return DEFAULT_CLASS_CONFIG;
 }
 
+// The teacher's open slicing window, or null when closed (or run out).
+async function readSlicing(env) {
+  try {
+    const rec = await env.CLASS_KV?.get(KV_SLICING, 'json');
+    if (rec && typeof rec.phrase === 'string' && Number(rec.until) > Date.now()) return rec;
+  } catch (e) {
+    console.error(JSON.stringify({ message: 'slicing window read failed', error: String(e) }));
+  }
+  return null;
+}
+
 // Key compared first; a wrong key waits a moment (slows guessing). No secret uploaded means no
 // teacher endpoint at all: never fall open. The key is long and random, so there is no lockout:
 // a school shares one IP, and a lockout would let one student lock out the teacher.
@@ -127,8 +140,35 @@ async function teacherOk(request, env) {
   return false;
 }
 
-async function handleTeacher(request, env, url) {
+async function handleTeacher(request, env, url, ctx) {
   if (!(await teacherOk(request, env))) return json(401, { error: 'key', message: 'Wrong teacher key.' });
+  if (url.pathname === '/api/teacher/slicing') {
+    if (request.method === 'GET') {
+      const rec = await readSlicing(env);
+      return json(200, { engine: !!slicerSender(env), open: !!rec, phrase: rec?.phrase ?? null, until: rec?.until ?? null, suggestion: generatePhrase() });
+    }
+    if (request.method === 'DELETE') {
+      await env.CLASS_KV?.delete(KV_SLICING);
+      return json(200, { open: false });
+    }
+    if (request.method !== 'PUT') return json(405, { error: 'method', message: 'Use GET, PUT or DELETE.' });
+    let body;
+    try {
+      body = JSON.parse(new TextDecoder().decode(await request.arrayBuffer()).slice(0, MAX_TEACHER_BYTES));
+    } catch {
+      return json(400, { error: 'json', message: 'The page sent something the server could not read.' });
+    }
+    const v = validateOpenRequest(body);
+    if (!v.ok) return json(400, { error: 'invalid', message: 'Pick how long, and a phrase of 4 to 40 letters.', details: [v.error] });
+    if (!env.CLASS_KV) return json(503, { error: 'storage', message: 'Storage is not set up on this server.' });
+    const until = Date.now() + v.minutes * 60_000;
+    // KV forgets it by itself a minute after it runs out.
+    await env.CLASS_KV.put(KV_SLICING, JSON.stringify({ phrase: v.phrase, until }), { expirationTtl: v.minutes * 60 + 60 });
+    // Wake the slicer now, so the first student does not wait for it.
+    const send = slicerSender(env);
+    if (send) ctx?.waitUntil?.(send('/health', { method: 'GET' }).catch(() => {}));
+    return json(200, { open: true, phrase: v.phrase, until, engine: !!send });
+  }
   if (url.pathname === '/api/teacher/warmup') {
     if (request.method !== 'POST') return json(405, { error: 'method', message: 'Use POST.' });
     const send = slicerSender(env);
@@ -225,6 +265,17 @@ async function handleSlice(request, env) {
   if (!(length >= 0) || length > LIMITS.maxUploadBytes + 64 * 1024) {
     return refuse(413, `That plate is too big to send (the most is ${LIMITS.maxUploadBytes / 1048576} MB).`);
   }
+  // The class gate, only when a slicer is connected (without one there is nothing to open). It
+  // comes before reading the upload, so a closed site does no work at all.
+  if (slicerSender(env)) {
+    const open = await readSlicing(env);
+    if (!open) {
+      return json(403, { error: 'closed', message: 'Slicing is closed right now. Your teacher opens it during class.' });
+    }
+    if (normalizePhrase(request.headers.get('x-class-phrase')) !== open.phrase) {
+      return json(403, { error: 'phrase', message: "That class phrase is not right. Check the board and type it again." });
+    }
+  }
   let form;
   try {
     form = await request.formData();
@@ -260,7 +311,8 @@ async function handleSlice(request, env) {
   if (send) {
     const tooFast = await slicerBudget(request, env);
     if (tooFast) return tooFast;
-    return sliceWithEngine(send, stlBytes, checked.settings, fileName, classConfig.maxPrintMinutes);
+    const meshName = safeNamePart(form.get('modelName'), 'plate', LIMITS.maxFileNameLength);
+    return sliceWithEngine(send, stlBytes, checked.settings, fileName, classConfig.maxPrintMinutes, meshName);
   }
 
   return json(501, {
@@ -274,13 +326,17 @@ async function handleSlice(request, env) {
   });
 }
 
-async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinutes = 0) {
+async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinutes = 0, meshName = 'plate') {
   let res;
   try {
     res = await send('/slice', {
       method: 'POST',
       body: stlBytes,
-      headers: { 'content-type': 'model/stl', 'x-cura-settings': JSON.stringify(toCuraOverrides(settings)) },
+      headers: {
+        'content-type': 'model/stl',
+        'x-cura-settings': JSON.stringify(toCuraOverrides(settings)),
+        'x-model-name': meshName, // written into the G-code as ";MESH:<name>.stl", like Cura
+      },
     });
   } catch {
     return refuse(503, 'The slicer is not answering. Try again in a minute.');
@@ -321,14 +377,19 @@ async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinut
   });
 }
 
-async function handleApi(request, env, url) {
+async function handleApi(request, env, url, ctx) {
   if (url.pathname === '/api/health') return json(200, { ok: true, engine: !!slicerSender(env) });
+  if (url.pathname === '/api/slicing') {
+    // Public: is slicing open, and until when. Never the phrase.
+    const rec = await readSlicing(env);
+    return json(200, { engine: !!slicerSender(env), open: !!rec, until: rec?.until ?? null });
+  }
   if (url.pathname === '/api/class') {
     if (request.method !== 'GET') return json(405, { error: 'method', message: 'Use GET.' });
     return json(200, await readClassConfig(env));
   }
   // Everything under /api/teacher/ needs the key, even paths that do not exist.
-  if (url.pathname.startsWith('/api/teacher/')) return handleTeacher(request, env, url);
+  if (url.pathname.startsWith('/api/teacher/')) return handleTeacher(request, env, url, ctx);
   if (url.pathname === '/api/slice') {
     if (request.method !== 'POST') return json(405, { error: 'method', message: 'Use POST.' });
     return handleSlice(request, env);
@@ -337,13 +398,13 @@ async function handleApi(request, env, url) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const target = redirectTarget(request.url);
     if (target !== null) {
       return withSecurityHeaders(new Response(null, { status: 301, headers: { location: target } }));
     }
     const url = new URL(request.url);
-    if (url.pathname.startsWith('/api/')) return withSecurityHeaders(await handleApi(request, env, url));
+    if (url.pathname.startsWith('/api/')) return withSecurityHeaders(await handleApi(request, env, url, ctx));
     return withSecurityHeaders(await env.ASSETS.fetch(request));
   },
 };

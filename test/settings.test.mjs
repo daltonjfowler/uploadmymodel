@@ -7,6 +7,7 @@ import {
   CLASS_DEFAULTS, INFILL_PATTERNS, PRINTER, SETTINGS, TREE_SUPPORT_INFILL, applyClassLocks, checkAgainstClass, lockedRows,
   gcodeFileName, safeNamePart, summarize, toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
+import { generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
 import { checkPlateSTL } from '../src/worker.js';
 
 test('class defaults match the school profile current_lulzbot_9_18', () => {
@@ -80,6 +81,16 @@ test('G-code file names: the student own name, or name-model', () => {
   assert.equal(gcodeFileName('???', 'Jordan', 'Boat'), 'jordan-boat.gcode'); // nothing usable: default
   assert.ok(gcodeFileName('a'.repeat(80), '', '').length <= 30 + 6);
   assert.equal(gcodeFileName('', 'Alexandria-Rosemary', 'Very Long Model Name Here'), 'alexandria-rosemary-very-long.gcode');
+});
+
+test('class phrases: forgiving to type, strict to check', () => {
+  assert.equal(normalizePhrase('  Orange Walrus__TACO '), 'orange-walrus-taco');
+  assert.equal(normalizePhrase('orange--walrus-taco!'), 'orange-walrus-taco');
+  assert.match(generatePhrase(), /^[a-z]+-[a-z]+-[a-z]+$/);
+  assert.deepEqual(validateOpenRequest({ minutes: 50, phrase: 'Blue Robot' }), { ok: true, phrase: 'blue-robot', minutes: 50 });
+  for (const bad of [{ minutes: 51, phrase: 'blue-robot' }, { minutes: 50, phrase: 'ab' }, { minutes: 50, phrase: 'x'.repeat(41) }, null]) {
+    assert.equal(validateOpenRequest(bad).ok, false, JSON.stringify(bad));
+  }
 });
 
 test('safe file names', () => {

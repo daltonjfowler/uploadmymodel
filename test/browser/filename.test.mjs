@@ -2,7 +2,7 @@
 // download where there is none. Needs the slicer (local only: SLICER_URL).
 import { chromium } from 'playwright-core';
 import { readFileSync } from 'node:fs';
-import { BASE, CHROME } from './lib.mjs';
+import { BASE, CHROME, knowPhrase } from './lib.mjs';
 const base = (process.argv[2] || BASE) + '?debug';
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const check = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}: ${JSON.stringify(got)}${ok ? '' : ` (want ${JSON.stringify(want)})`}`); if (!ok) process.exitCode = 1; };
@@ -18,6 +18,7 @@ async function sliced(page) {
 // 1. Chrome's save dialog: the name the student typed is suggested, and the file is written.
 {
   const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+  await knowPhrase(ctx);
   await ctx.addInitScript(() => {
     window.__saved = null;
     window.showSaveFilePicker = async (opts) => ({
@@ -49,6 +50,7 @@ async function sliced(page) {
 // 2. No save dialog (other browsers): a normal download with the name.
 {
   const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 }, acceptDownloads: true });
+  await knowPhrase(ctx);
   await ctx.addInitScript(() => { delete window.showSaveFilePicker; window.showSaveFilePicker = undefined; });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));

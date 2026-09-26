@@ -18,15 +18,20 @@ function plateSTL() {
   return buf;
 }
 
-function env({ config, slicer = 'http://slicer.test' } = {}) {
+const PHRASE = 'orange-walrus-taco';
+const OPEN = { phrase: PHRASE, until: Date.now() + 3_600_000 };
+
+// KV stand-in: the class setup under "class", the teacher's open window under "slicing".
+function env({ config, slicer = 'http://slicer.test', slicing = OPEN } = {}) {
+  const store = { class: config ?? null, slicing };
   return {
     SLICER_URL: slicer ?? undefined,
-    CLASS_KV: { get: async () => config ?? null, put: async () => {} },
+    CLASS_KV: { get: async (k) => store[k] ?? null, put: async (k, v) => { store[k] = JSON.parse(v); }, delete: async (k) => { store[k] = null; } },
     ASSETS: { fetch: async () => new Response('asset') },
   };
 }
 
-function sliceRequest(settings = {}, name = 'Jordan', modelName = 'Rocket Ship') {
+function sliceRequest(settings = {}, name = 'Jordan', modelName = 'Rocket Ship', phrase = 'Orange Walrus  Taco') {
   const form = new FormData();
   form.append('model', new Blob([plateSTL()]), 'plate.stl');
   form.append('settings', JSON.stringify(settings));
@@ -35,7 +40,10 @@ function sliceRequest(settings = {}, name = 'Jordan', modelName = 'Rocket Ship')
   const body = new Request('https://uploadmymodel.com/api/slice', { method: 'POST', body: form });
   return body.arrayBuffer().then((bytes) => new Request('https://uploadmymodel.com/api/slice', {
     method: 'POST', body: bytes,
-    headers: { 'content-type': body.headers.get('content-type'), 'content-length': String(bytes.byteLength) },
+    headers: {
+      'content-type': body.headers.get('content-type'), 'content-length': String(bytes.byteLength),
+      ...(phrase ? { 'x-class-phrase': phrase } : {}),
+    },
   }));
 }
 
@@ -134,6 +142,32 @@ test('the container path (slicerSend) is used when present', async () => {
   const res = await worker.fetch(await sliceRequest(), e);
   assert.equal(res.status, 200);
   assert.deepEqual(calls, ['/slice']);
+});
+
+test('class gate: closed, wrong phrase, and run-out windows never reach the slicer', async () => {
+  const calls = fakeSlicer();
+  let res = await worker.fetch(await sliceRequest(), env({ slicing: null }));
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).error, 'closed');
+  res = await worker.fetch(await sliceRequest({}, 'J', 'M', 'purple-walrus-taco'), env());
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).error, 'phrase');
+  res = await worker.fetch(await sliceRequest({}, 'J', 'M', ''), env());
+  assert.equal(res.status, 403);
+  res = await worker.fetch(await sliceRequest(), env({ slicing: { phrase: PHRASE, until: Date.now() - 1000 } }));
+  assert.equal((await res.json()).error, 'closed');
+  assert.equal(calls.length, 0);
+});
+
+test('public status says open or closed, never the phrase', async () => {
+  let res = await worker.fetch(new Request('https://uploadmymodel.com/api/slicing'), env());
+  let body = await res.json();
+  assert.equal(body.open, true);
+  assert.equal(body.engine, true);
+  assert.equal('phrase' in body, false);
+  assert.equal(JSON.stringify(body).includes(PHRASE), false);
+  res = await worker.fetch(new Request('https://uploadmymodel.com/api/slicing'), env({ slicing: null }));
+  assert.equal((await res.json()).open, false);
 });
 
 test('without SLICER_URL the answer is still 501 (the live site today)', async () => {

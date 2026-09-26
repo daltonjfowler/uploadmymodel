@@ -35,3 +35,19 @@ export function ensureMushroom() {
   writeFileSync(file, buf);
   return file;
 }
+
+// The class gate (shared/slicing.js): tests that slice open it with this phrase and give the page
+// the phrase, so they do not have to type it.
+export const TEST_PHRASE = 'test-phrase-please';
+
+export async function openSlicing(request, base, key, minutes = 90) {
+  return request.put(`${base.replace(/\?.*$/, '')}api/teacher/slicing`, {
+    headers: { 'x-teacher-key': key, 'content-type': 'application/json' },
+    data: { phrase: TEST_PHRASE, minutes },
+  });
+}
+
+/** For browser.newContext(): the page already knows the phrase (sessionStorage). */
+export async function knowPhrase(ctx) {
+  await ctx.addInitScript((p) => { try { sessionStorage.setItem('umm.phrase', p); } catch {} }, TEST_PHRASE);
+}

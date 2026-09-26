@@ -1,8 +1,10 @@
 import { chromium } from 'playwright-core';
 import { BASE, BENCHY, CHROME, OUT, ensureMushroom } from './lib.mjs';
+import { knowPhrase } from './lib.mjs';
 const base = process.argv[2] || BASE;
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+await knowPhrase(page);
 const errors = [];
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('501') && !m.text().includes('cloudflareinsights')) errors.push(m.text()); });

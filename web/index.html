@@ -140,6 +140,22 @@
     </form>
   </dialog>
 
+  <dialog id="phraseDialog" class="dialog">
+    <form method="dialog" id="phraseForm">
+      <h2>Class phrase</h2>
+      <p>Your teacher put a phrase on the board. Type it to slice. You only need to do this once.</p>
+      <label class="phrase-field">
+        <span class="sr-only">Class phrase</span>
+        <input id="phraseInput" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="e.g. orange-walrus-taco" aria-label="Class phrase">
+      </label>
+      <p id="phraseError" class="advice warn" hidden></p>
+      <div class="dialog-actions">
+        <button value="cancel" type="submit" formnovalidate>Cancel</button>
+        <button value="ok" class="primary" type="submit">Slice</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="printerDialog" class="dialog">
     <form method="dialog">
       <h2>Class printer</h2>
