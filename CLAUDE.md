@@ -37,7 +37,10 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   Not deployed to Cloudflare (container cost is Dalton's call). See container/README.md.
 - `profiles/current_lulzbot_9_18.json`: the class profile, decoded from the school G-code footer.
 - `test/golden/*.gcode`: real G-code sliced by school Cura. Stored byte for byte (`-text`).
-- `test/*.test.mjs`: settings and server checks (`npm test`).
+- `test/*.test.mjs`: settings, server and G-code reader checks (`npm test`).
+- `test/browser/`: ~100 browser checks with playwright-core + installed Chrome (`npm run dev`, then
+  `npm run test:browser`; live: `npm run test:browser -- https://uploadmymodel.com/ <teacher key>`).
+  `node test/browser/perf.test.mjs <base> 500000` times a big model with the CPU slowed 4x.
 
 ## Rules
 - Printer facts are guesses until docs/HARDWARE.md says where they came from.
@@ -54,7 +57,7 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
 
 ## Commands
 `npm run build`, `npm run dev` (build + wrangler dev), `npm run dev:web` (Vite, proxies /api to
-:8787), `npm test`, `npm run deploy`, `npm run icons`.
+:8787), `npm test`, `npm run test:browser`, `npm run deploy`, `npm run icons`.
 
 Windows: run wrangler dev with `--ip 127.0.0.1 --local-upstream localhost`, or the Worker sees the
 real domain and redirects. After each `npm run build`, restart wrangler dev: it keeps serving the

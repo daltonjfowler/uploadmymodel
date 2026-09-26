@@ -25,7 +25,8 @@ npm install
 npm run build       # web/ → public/ (Vite)
 npm run dev         # build, then wrangler dev
 npm run dev:web     # Vite dev server; proxies /api to wrangler dev on :8787
-npm test            # settings and server checks
+npm test            # settings, server and G-code reader checks
+npm run test:browser  # ~100 browser checks against npm run dev (needs Chrome)
 npm run deploy      # build and deploy to uploadmymodel.com
 npm run icons       # redraw icon.svg and the PNG icons into web/public
 ```
