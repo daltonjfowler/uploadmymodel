@@ -15,8 +15,10 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
     `window.umm = { viewer, panel }` for browser tests.
   - `src/settings-panel.js`: Recommended / Custom settings card and hover help.
   - `src/main.js`: tools, object list, Slice / result card, keyboard, drag and drop.
-  - `teacher/index.html` + `src/teacher.js`: the teacher page (key, which settings are locked,
-    class defaults, a note to students). No three.js on this page.
+  - `teacher/index.html` + `src/teacher.js`: the teacher page (key, slicing window + class phrase,
+    which settings are locked, class defaults, print-time limit, note, slicer warm-up).
+  - `usb-test/index.html` + `src/usb-test.js`: read-only printer USB test (Web Serial; only M115,
+    M105, M27, M20 can be sent). Plan for print-from-USB: docs/USB_PRINTING.md.
   - `src/loaders.js`: STL / OBJ / 3MF → triangle soup, and the sample model.
   - `src/plate-store.js`: keeps the plate in IndexedDB so a reloaded tab gets it back.
   - `src/mesh-health.js`: open / over-shared edge check ("holes" flag), run once per model in idle.
@@ -50,9 +52,12 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   Our output must match the school version's start/end G-code byte for byte.
 - Students must never be able to set temperatures, speeds, retraction, or start/end G-code. New
   student settings go in `shared/settings.js` only, as a list or a stepped range, with a test.
-- Tree supports are always 0% support infill (Dalton's rule). Not a student setting. NOTE: school's
-  4.13.2 engine makes 0% branches hollow (about half of school's 15% support plastic); decision and
-  a test print pending, see container/README.md.
+- Tree supports are always 0% support infill (Dalton's rule, confirmed 2026-09-26 knowing that
+  school's 4.13.2 engine makes 0% branches hollow, about half of school's 15% support plastic).
+  Not a student setting.
+- Slicing is gated by the teacher (shared/slicing.js): an open window + class phrase in KV
+  ("slicing"), checked before the upload is read, and only when a slicer is connected. Everything
+  else on the site works without it. Never let a request reach the slicer outside the window.
 - Locked-row temperatures follow the layer height's 4.13.2 quality file (`lockedRows()`).
 - Every plate change goes through a `Viewer` method that calls `record()` (or `transaction()` for
   several steps), so Undo works. Never move, scale or turn a model's mesh directly from `main.js`.

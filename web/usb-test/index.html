@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>uploadmymodel · printer USB test</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+  <meta name="theme-color" content="#9A3412">
+  <!-- Blocking on purpose: sets data-theme before the first paint. -->
+  <script src="/theme-boot.js"></script>
+</head>
+<body class="page">
+  <header class="titlebar">
+    <strong class="brand"><img src="/icon.svg" alt="" width="36" height="36">uploadmymodel</strong>
+    <span class="page-tag">USB test</span>
+    <span class="grow"></span>
+    <a class="toplink" href="/teacher/">Teacher</a>
+    <button id="theme" class="themebtn" type="button">🖥️ System</button>
+  </header>
+
+  <main class="page-main">
+    <h1 class="page-title">Printer USB test</h1>
+    <p class="lede">Can this Chromebook talk to the LulzBot over its USB cable? This page only
+      <strong>asks</strong> the printer questions: firmware, temperatures, SD card. It cannot heat, move
+      or print anything. It is the first step towards "print from USB" (see docs/USB_PRINTING.md).</p>
+
+    <section class="card page-card">
+      <h2>1. Connect</h2>
+      <p class="note">Plug the printer's USB cable into the Chromebook, switch the printer on, then press
+        Connect and pick the printer in the list (it may show as "USB Serial" or a Rambo / Einsy board).</p>
+      <div class="setup-actions">
+        <label class="limit-row"><span>Speed</span>
+          <select id="baud" aria-label="Serial speed">
+            <option value="auto">Try both (250000, then 115200)</option>
+            <option value="250000">250000</option>
+            <option value="115200">115200</option>
+          </select>
+        </label>
+        <button id="connect" class="primary" type="button">Connect</button>
+        <button id="disconnect" type="button" disabled>Disconnect</button>
+      </div>
+      <p id="state" class="status" role="status" aria-live="polite">Not connected.</p>
+    </section>
+
+    <section class="card page-card">
+      <h2>2. Ask the printer</h2>
+      <div class="setup-actions" id="asks">
+        <button type="button" data-cmd="M115" disabled>Firmware (M115)</button>
+        <button type="button" data-cmd="M105" disabled>Temperatures (M105)</button>
+        <button type="button" data-cmd="M27" disabled>SD print status (M27)</button>
+        <button type="button" data-cmd="M20" disabled>Files on SD (M20)</button>
+      </div>
+      <dl class="stats" id="facts"></dl>
+    </section>
+
+    <section class="card page-card">
+      <h2>What the printer said</h2>
+      <pre id="log" class="usb-log" aria-live="polite"></pre>
+      <div class="setup-actions"><button id="copy" type="button">Copy for Dalton</button><span id="copied" class="note"></span></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Internal district tool.</span>
+    <a href="/teacher/">Teacher</a>
+    <a href="https://uploadmycode.com" target="_blank" rel="noopener">uploadmycode</a>
+    <a href="https://uploadmylaser.com" target="_blank" rel="noopener">uploadmylaser</a>
+    <a href="https://teachchat.app" target="_blank" rel="noopener">teachChat</a>
+    <a href="https://daltonjfowler.com" target="_blank" rel="noopener">Made by Dalton Fowler</a>
+    <a href="https://github.com/daltonjfowler/uploadmymodel" target="_blank" rel="noopener">Open source</a>
+  </footer>
+
+  <script type="module" src="/src/usb-test.js"></script>
+</body>
+</html>

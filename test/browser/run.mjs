@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const base = process.argv[2] || 'http://127.0.0.1:8787/';
 const key = process.argv[3] || 'local-test-key-not-real';
 const live = !/127\.0\.0\.1|localhost/.test(base);
-const tests = ['undo', 'angle', 'multi', 'preview', 'autosave', 'health', 'threemf', 'a11y', 'teacher', 'fixes', ...(live ? [] : ['e2e', 'limit', 'filename', 'gate'])];
+const tests = ['undo', 'angle', 'multi', 'preview', 'autosave', 'health', 'threemf', 'a11y', 'usb', 'teacher', 'fixes', ...(live ? [] : ['e2e', 'limit', 'filename', 'gate'])];
 let failed = 0;
 if (!live) {
   const r = await fetch(`${base}api/teacher/slicing`, {
