@@ -5,6 +5,7 @@
 import './style.css';
 import { LIMITS, PRINTER, safeNamePart, summarize } from '../../shared/settings.js';
 import { $, el, esc, fmt } from './dom.js';
+import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.js';
 import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
 import { SettingsPanel } from './settings-panel.js';
 import { initThemeButton, isDark, onThemeChange } from './theme.js';
@@ -18,6 +19,8 @@ const panel = new SettingsPanel($('#settings'), $('#hint'));
 if (new URLSearchParams(location.search).has('debug')) window.umm = { viewer, panel };
 
 let tool = 'move';
+let stage = 'prepare'; // 'prepare' (plate + settings) or 'preview' (G-code layers)
+let previewSource = null; // { kind: 'file' | 'slice', name }
 let slice = { state: 'idle' }; // idle | slicing | done | error
 let sliceAbort = null;
 
@@ -75,7 +78,34 @@ $('#sample').addEventListener('click', () => {
   });
 });
 
+async function openGcode(file) {
+  if (file.size > 80 * 1048576) {
+    toast(`"${file.name}" is too big to preview here.`, { kind: 'error' });
+    return;
+  }
+  busy(`Reading ${file.name}…`);
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+  try {
+    const parsed = parseGcode(await file.text());
+    if (!parsed.layers.length) {
+      toast(`No layers found in "${file.name}". Is it a G-code file from Cura?`, { kind: 'error', timeout: 9000 });
+      return;
+    }
+    showGcode(parsed, { kind: 'file', name: file.name });
+    toast('Preview only: this shows the file, it does not change it.', { timeout: 5000 });
+  } catch (err) {
+    console.error(err);
+    toast(`Could not read "${file.name}".`, { kind: 'error' });
+  } finally {
+    busy(null);
+  }
+}
+
 async function loadFiles(files) {
+  const gcode = files.filter((f) => /\.gcode$/i.test(f.name));
+  files = files.filter((f) => !gcode.includes(f));
+  if (gcode.length) await openGcode(gcode.at(-1));
+  if (files.length && stage === 'preview') setStage('prepare');
   for (const file of files) {
     if (viewer.models.length >= LIMITS.maxObjects) {
       toast(`That is ${LIMITS.maxObjects} objects already, the most for one plate.`, { kind: 'error' });
@@ -234,7 +264,7 @@ function renderGroupPanel(p) {
 
 function renderTools() {
   const m = viewer.selected;
-  const count = viewer.selection.size;
+  const count = stage === 'preview' ? 0 : viewer.selection.size;
   for (const b of document.querySelectorAll('.tool[data-tool]')) {
     b.classList.toggle('on', b.dataset.tool === tool && count === 1);
     b.disabled = count !== 1;
@@ -405,6 +435,16 @@ function renderAction() {
   const outside = models.filter((m) => m.outside);
   card.innerHTML = '';
 
+  if (stage === 'preview' && previewSource?.kind === 'file') {
+    const p = el('p', { class: 'action-empty' });
+    p.append('Previewing ', el('strong', {}, previewSource.name), ' from this computer. It is not changed.');
+    card.append(p);
+    const back = el('button', { type: 'button', class: 'wide' }, '← Back to Prepare');
+    back.addEventListener('click', () => setStage('prepare'));
+    card.append(back);
+    return;
+  }
+
   if (!models.length) {
     card.innerHTML = `<p class="action-empty">Open a model to start.</p>`;
     card.append(el('button', { type: 'button', class: 'primary big wide', disabled: '' }, 'Slice'));
@@ -504,6 +544,12 @@ async function runSlice() {
       const cd = res.headers.get('content-disposition') ?? '';
       const name = /filename="([^"]+)"/.exec(cd)?.[1] ?? fileName();
       slice = { state: 'done', download: true, url: URL.createObjectURL(blob), fileName: name, stats: res.headers.get('x-print-summary') };
+      try {
+        const parsed = parseGcode(await blob.text());
+        if (parsed.layers.length) showGcode(parsed, { kind: 'slice', name });
+      } catch (err) {
+        console.error(err); // the file is still there to save; only the preview failed
+      }
     } else {
       const body = type.includes('json') ? await res.json() : {};
       if (res.status === 501 && body.error === 'engine_not_ready') {
@@ -577,8 +623,13 @@ $('#printerChip').addEventListener('click', () => $('#printerDialog').showModal(
 
 // Keyboard shortcuts, like Cura's. Ignored while typing in a box.
 window.addEventListener('keydown', (e) => {
-  const tag = document.activeElement?.tagName;
-  const typing = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
+  // Typing = a text box or a list. A focused checkbox or button must not swallow shortcuts; a
+  // focused slider keeps its own arrow keys.
+  const active = document.activeElement;
+  const tag = active?.tagName;
+  const inputType = tag === 'INPUT' ? active.type : '';
+  const typing = tag === 'SELECT' || tag === 'TEXTAREA' || inputType === 'range'
+    || (tag === 'INPUT' && !['checkbox', 'radio', 'button', 'submit'].includes(inputType));
   const ctrl = e.ctrlKey || e.metaKey;
   if (ctrl && e.key.toLowerCase() === 'o') {
     e.preventDefault();
@@ -586,6 +637,17 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (typing || document.querySelector('dialog[open]')) return;
+  if (stage === 'preview' && !ctrl) {
+    const step = e.shiftKey ? 10 : 1;
+    const moves = { ArrowUp: step, ArrowRight: step, ArrowDown: -step, ArrowLeft: -step, PageUp: 10, PageDown: -10 };
+    if (e.key in moves) {
+      e.preventDefault();
+      setLayer(viewer.previewLayer + moves[e.key]);
+    } else if (e.key === 'Home') setLayer(0);
+    else if (e.key === 'End') setLayer(Infinity);
+    else if (e.key === 'Escape') setStage('prepare');
+    return;
+  }
   const m = viewer.selected;
   const any = viewer.selection.size > 0;
   const key = e.key.toLowerCase();
@@ -624,6 +686,115 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'm' || e.key === 'M') setTool('mirror');
   else if (e.key === 'f' || e.key === 'F') viewer.frameSelection();
 });
+
+// ---- Stages: Prepare (plate + settings) and Preview (G-code layers) ------------------------------
+
+function setStage(next) {
+  if (next === 'preview' && !viewer.preview) return;
+  stage = next;
+  viewer.setStage(next);
+  document.body.dataset.stage = next;
+  for (const b of document.querySelectorAll('.stage[data-stage]')) {
+    const on = b.dataset.stage === next;
+    b.classList.toggle('on', on);
+    if (on) b.setAttribute('aria-current', 'step');
+    else b.removeAttribute('aria-current');
+  }
+  $('#settings').hidden = next === 'preview';
+  $('#previewCard').hidden = next !== 'preview';
+  if (viewer.layFlatPicking) viewer.startLayFlatPick(false);
+  renderPreviewCard();
+  renderTools();
+  renderAction();
+}
+
+for (const b of document.querySelectorAll('.stage[data-stage]')) {
+  b.addEventListener('click', () => setStage(b.dataset.stage));
+}
+
+function showGcode(parsed, source) {
+  viewer.setPreview(parsed);
+  previewSource = source;
+  const btn = document.querySelector('.stage[data-stage="preview"]');
+  btn.disabled = false;
+  btn.title = 'See the layers of the sliced file.';
+  setStage('preview');
+}
+
+function layerLabel() {
+  const g = viewer.preview;
+  const n = viewer.previewLayer;
+  return `Layer ${n + 1} of ${g.layers.length} · ${fmt(g.layers[n], 2)} mm`;
+}
+
+function setLayer(n) {
+  viewer.setPreviewLayer(n);
+  const slider = $('#layerSlider');
+  if (slider) {
+    slider.value = String(viewer.previewLayer);
+    slider.style.setProperty('--pct', `${(viewer.previewLayer / Math.max(1, viewer.preview.layers.length - 1)) * 100}%`);
+    $('#layerLabel').textContent = layerLabel();
+  }
+}
+
+function renderPreviewCard() {
+  const card = $('#previewCard');
+  const g = viewer.preview;
+  if (!g || stage !== 'preview') return;
+  card.innerHTML = '';
+  const head = el('div', { class: 'settings-head static' });
+  head.innerHTML = `<span class="settings-icon" aria-hidden="true">▤</span>
+    <span class="settings-title"><strong>Layer preview</strong><span class="settings-summary"></span></span>`;
+  head.querySelector('.settings-summary').textContent = previewSource?.name ?? '';
+  card.append(head);
+
+  const body = el('div', { class: 'settings-body' });
+  const grams = g.filamentG ?? filamentGrams(g.filamentM);
+  const stats = el('dl', { class: 'stats' });
+  const stat = (label, value) => stats.append(el('dt', {}, label), el('dd', {}, value));
+  stat('Print time', g.timeS ? `${formatDuration(g.timeS)} (Cura's guess)` : 'not in the file');
+  stat('Filament', g.filamentM ? `${fmt(g.filamentM, 2)} m · about ${fmt(grams)} g` : 'not in the file');
+  stat('Layers', `${g.layers.length}${g.layerHeight ? ` · ${fmt(g.layerHeight, 2)} mm each` : ''}`);
+  body.append(stats);
+
+  const sliderWrap = el('div', { class: 'slider layer-slider' });
+  const label = el('p', { class: 'layer-label', id: 'layerLabel' }, layerLabel());
+  const row = el('div', { class: 'layer-row' });
+  const down = el('button', { type: 'button', 'aria-label': 'One layer down' }, '▼');
+  const slider = el('input', {
+    type: 'range', id: 'layerSlider', min: 0, max: g.layers.length - 1, step: 1, value: viewer.previewLayer, 'aria-label': 'Layer',
+  });
+  const up = el('button', { type: 'button', 'aria-label': 'One layer up' }, '▲');
+  slider.addEventListener('input', () => setLayer(Number(slider.value)));
+  down.addEventListener('click', () => setLayer(viewer.previewLayer - 1));
+  up.addEventListener('click', () => setLayer(viewer.previewLayer + 1));
+  row.append(down, slider, up);
+  sliderWrap.append(label, row, el('p', { class: 'note' }, 'Drag, or use ↑ ↓ (Shift for 10 at a time).'));
+  body.append(sliderWrap);
+
+  const legend = el('div', { class: 'legend' });
+  LINE_TYPES.forEach((t, i) => {
+    if (!g.types[i].segments.length) return;
+    const item = el('label', { class: 'legend-item' });
+    const cb = el('input', { type: 'checkbox' });
+    cb.checked = viewer.previewParts[i]?.lines.visible ?? true;
+    cb.addEventListener('change', () => viewer.setPreviewTypeVisible(i, cb.checked));
+    const sw = el('span', { class: 'swatch', 'aria-hidden': 'true' });
+    sw.style.background = t.color;
+    item.append(cb, sw, el('span', {}, t.label));
+    legend.append(item);
+  });
+  body.append(legend);
+  body.append(el('p', { class: 'note' }, 'Shows where plastic goes on each layer. Moves without plastic are hidden.'));
+  card.append(body);
+
+  const foot = el('div', { class: 'settings-foot' });
+  const back = el('button', { type: 'button', class: 'linkbtn' }, '← Back to Prepare');
+  back.addEventListener('click', () => setStage('prepare'));
+  foot.append(back);
+  card.append(foot);
+  setLayer(viewer.previewLayer);
+}
 
 // The teacher's class setup: which settings are locked, the class defaults, a note. If the
 // server cannot be reached the page still works with the school profile (everything open).

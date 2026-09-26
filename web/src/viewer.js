@@ -9,7 +9,11 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
+import { LINE_TYPES } from './gcode.js';
 
 // Picking a 500k-triangle model by testing every triangle takes ~0.25 s on a slow Chromebook, too
 // slow for hover and drag. three-mesh-bvh (MIT) builds a search tree per model instead. Building
@@ -157,6 +161,8 @@ export class Viewer extends EventTarget {
     this.selected = null; // the model the tool panel shows (the last one clicked)
     this.selection = new Set(); // every selected model; Ctrl + click adds more
     this.gizmo = null; // 'rotate' shows the rotate rings
+    this.stage = 'prepare';
+    this.previewParts = [];
     this.undoStack = [];
     this.redoStack = [];
     this.pending = null;
@@ -252,7 +258,7 @@ export class Viewer extends EventTarget {
 
   updateRings() {
     const m = this.selection.size === 1 ? this.selected : null;
-    const show = this.gizmo === 'rotate' && !!m && !this.ringDrag;
+    const show = this.gizmo === 'rotate' && !!m && !this.ringDrag && this.stage !== 'preview';
     this.rings.visible = show || !!this.ringDrag;
     if (!m || this.ringDrag) return;
     const s = m.size;
@@ -582,6 +588,7 @@ export class Viewer extends EventTarget {
   }
 
   attach(model, index = this.models.length) {
+    model.mesh.visible = this.stage !== 'preview';
     this.models.splice(index, 0, model);
     this.scene.add(model.mesh);
     this.select(model);
@@ -677,7 +684,7 @@ export class Viewer extends EventTarget {
 
   // One blue box per selected model (red if it does not fit).
   updateSelectionBox() {
-    const list = this.selectedList;
+    const list = this.stage === 'preview' ? [] : this.selectedList;
     while (this.selectionBoxes.length < list.length) {
       const b = new THREE.Box3Helper(new THREE.Box3(), 0x2f81f7);
       this.scene.add(b);
@@ -998,6 +1005,11 @@ export class Viewer extends EventTarget {
       box.expandByPoint(new THREE.Vector3(m.position.x - s.x / 2, m.position.y - s.y / 2, 0));
       box.expandByPoint(new THREE.Vector3(m.position.x + s.x / 2, m.position.y + s.y / 2, s.z));
     }
+    this.frameBox(box);
+  }
+
+  /** Point the camera at a box (world coordinates), keeping the current viewing direction. */
+  frameBox(box) {
     const size = box.getSize(new THREE.Vector3());
     const r = Math.max(size.x, size.y, size.z, 20);
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();
@@ -1051,6 +1063,7 @@ export class Viewer extends EventTarget {
 
   onPointerDown(e) {
     this.down = { x: e.clientX, y: e.clientY };
+    if (this.stage === 'preview') return; // the camera still works; models cannot be touched
     if (e.button !== 0 || e.shiftKey) return; // right-drag and Shift + drag pan the camera
     if (!this.layFlatPicking && !(e.ctrlKey || e.metaKey)) {
       const axis = this.hitRing(e);
@@ -1123,7 +1136,7 @@ export class Viewer extends EventTarget {
       this.emit('dragging', this.drag.model);
       return;
     }
-    if (this.layFlatPicking || e.buttons) return;
+    if (this.layFlatPicking || e.buttons || this.stage === 'preview') return;
     // Hover cursor, at most every 80 ms: raycasting a big model on every mouse move is slow.
     const now = performance.now();
     if (now - (this.lastHover ?? 0) < 80) return;
@@ -1155,12 +1168,97 @@ export class Viewer extends EventTarget {
       }
       return;
     }
+    if (this.stage === 'preview') return;
     // A plain click (not a camera drag, not Ctrl/Shift) on empty space clears the selection.
     const plain = !(e.ctrlKey || e.metaKey || e.shiftKey);
     if (plain && this.down && e.button === 0 && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) < 5) {
       if (!this.pick(e)) this.select(null);
     }
     this.down = null;
+  }
+
+  // ---- Preview: G-code layers ---------------------------------------------------------------
+  // One thick-line object per line type (outer wall, infill, ...). All of a type's lines are in one
+  // buffer in layer order, so showing layers 0..n is just "draw the first k lines".
+
+  setPreview(parsed) {
+    this.clearPreview();
+    const group = new THREE.Group();
+    // G-code is in printer coordinates (front-left = 0,0); the bed is drawn centred on 0,0.
+    group.position.set(-this.printer.bed.x / 2, -this.printer.bed.y / 2, 0);
+    this.previewParts = parsed.types.map((t, i) => {
+      if (!t.segments.length) return null;
+      const geometry = new LineSegmentsGeometry();
+      geometry.setPositions(t.segments);
+      const material = new LineMaterial({ color: LINE_TYPES[i].color, linewidth: 2.2 });
+      const lines = new LineSegments2(geometry, material);
+      lines.frustumCulled = false;
+      group.add(lines);
+      return { lines, geometry, material, layerStart: t.layerStart };
+    });
+    this.preview = parsed;
+    this.previewGroup = group;
+    group.visible = this.stage === 'preview';
+    this.scene.add(group);
+    this.setPreviewLayer(parsed.layers.length - 1);
+    // Zoom to the printed part (G-code coordinates shifted to the centred bed).
+    const box = new THREE.Box3();
+    const v = new THREE.Vector3();
+    for (const t of parsed.types) {
+      const a = t.segments;
+      for (let i = 0; i < a.length; i += 3) box.expandByPoint(v.set(a[i], a[i + 1], a[i + 2]));
+    }
+    if (!box.isEmpty()) {
+      box.min.z = 0;
+      box.translate(group.position);
+      this.frameBox(box);
+    }
+  }
+
+  clearPreview() {
+    if (!this.previewGroup) return;
+    this.scene.remove(this.previewGroup);
+    for (const p of this.previewParts) {
+      if (!p) continue;
+      p.geometry.dispose();
+      p.material.dispose();
+    }
+    this.previewGroup = null;
+    this.previewParts = [];
+    this.preview = null;
+    this.requestRender();
+  }
+
+  /** Show layers 0..n (n counts from 0). */
+  setPreviewLayer(n) {
+    if (!this.preview) return;
+    const last = this.preview.layers.length - 1;
+    this.previewLayer = Math.max(0, Math.min(last, Math.round(n)));
+    for (const p of this.previewParts) {
+      if (p) p.geometry.instanceCount = p.layerStart[this.previewLayer + 1] / 6;
+    }
+    this.requestRender();
+  }
+
+  setPreviewTypeVisible(index, visible) {
+    const p = this.previewParts?.[index];
+    if (p) p.lines.visible = visible;
+    this.requestRender();
+  }
+
+  /** 'prepare' shows the models and tools; 'preview' shows the G-code lines instead. */
+  setStage(stage) {
+    this.stage = stage;
+    const preview = stage === 'preview';
+    for (const m of this.models) m.mesh.visible = !preview;
+    if (this.previewGroup) this.previewGroup.visible = preview;
+    for (const b of this.selectionBoxes) b.visible = !preview && b.visible;
+    if (preview) this.rings.visible = false;
+    else {
+      this.updateSelectionBox();
+      this.updateRings();
+    }
+    this.requestRender();
   }
 
   // ---- Output -------------------------------------------------------------------------------

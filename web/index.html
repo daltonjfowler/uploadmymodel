@@ -18,7 +18,7 @@
     <strong class="brand"><img src="/icon.svg" alt="" width="36" height="36">uploadmymodel</strong>
     <nav class="stages" aria-label="Steps">
       <button class="stage on" type="button" data-stage="prepare" aria-current="step">Prepare</button>
-      <button class="stage" type="button" data-stage="preview" disabled title="Slice your model first. The layer preview comes with the slicer.">Preview</button>
+      <button class="stage" type="button" data-stage="preview" disabled title="Slice first, or open a .gcode file, to see the layers.">Preview</button>
     </nav>
     <button id="printerChip" class="chip" type="button" aria-haspopup="dialog">
       <span class="chip-dot" aria-hidden="true"></span>
@@ -69,6 +69,7 @@
     </div>
 
     <aside id="settings" class="settings card" aria-label="Print settings"></aside>
+    <aside id="previewCard" class="settings card preview-card" aria-label="Layer preview" hidden></aside>
 
     <div class="bottom-left">
       <section id="objects" class="objects card" hidden>
@@ -131,6 +132,7 @@
         <tr><td>Nudge a model</td><td>Arrow keys (1 mm), Shift + arrows (10 mm)</td></tr>
         <tr><td>Copy / delete</td><td><kbd>Ctrl</kbd>+<kbd>D</kbd> · <kbd>Delete</kbd></td></tr>
         <tr><td>Undo / redo</td><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> · <kbd>Ctrl</kbd>+<kbd>Y</kbd></td></tr>
+        <tr><td>Preview layers</td><td>Open a <code>.gcode</code> file, then ↑ ↓ to step through layers</td></tr>
       </table>
       <p class="note">Nothing leaves this Chromebook until you press Slice. Models are sliced and forgotten, never saved.</p>
       <div class="dialog-actions"><button class="primary" value="close">Got it</button></div>

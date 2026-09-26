@@ -5,7 +5,8 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { ThreeMFLoader } from 'three/addons/loaders/3MFLoader.js';
 
-export const ACCEPT = '.stl,.obj,.3mf';
+// .gcode opens in the Preview tab instead of on the plate (main.js handles it).
+export const ACCEPT = '.stl,.obj,.3mf,.gcode';
 
 export class LoadError extends Error {}
 

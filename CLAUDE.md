@@ -18,6 +18,9 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   - `teacher/index.html` + `src/teacher.js`: the teacher page (key, which settings are locked,
     class defaults, a note to students). No three.js on this page.
   - `src/loaders.js`: STL / OBJ / 3MF → triangle soup, and the sample model.
+  - `src/gcode.js`: reads Cura G-code (`;LAYER:`, `;TYPE:`) into printed lines per type and layer
+    for the Preview tab. Tested against the school Benchy (`test/gcode.test.mjs`). Opening a
+    `.gcode` file previews it; a real slice result will preview the same way.
   - `public/`: icons, manifest, `theme-boot.js` (copied as-is into the build).
 - `src/worker.js`: http → https, www → apex, security headers + CSP, `/api/health`,
   `/api/class` (public class setup), `/api/teacher/class` (GET/PUT, needs `x-teacher-key`), and

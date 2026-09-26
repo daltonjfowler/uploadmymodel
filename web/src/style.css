@@ -357,6 +357,22 @@ kbd { font: .8rem ui-monospace, Consolas, monospace; border: 1px solid var(--lin
   background: var(--top); border-top: 1px solid var(--line); color: var(--muted); font-size: .8rem;
 }
 
+/* ---- Preview stage ---- */
+body[data-stage="preview"] .tools, body[data-stage="preview"] .tool-panel, body[data-stage="preview"] .history,
+body[data-stage="preview"] #objects, body[data-stage="preview"] .empty { display: none !important; }
+.settings-head.static { cursor: default; border-radius: var(--radius) var(--radius) 0 0; }
+.settings-head.static:hover { background: none !important; }
+.stats { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: .9rem; }
+.stats dt { color: var(--muted); }
+.stats dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.layer-label { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.layer-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
+.layer-row button { padding: 4px 9px; font-size: .8rem; }
+.legend { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+.legend-item { display: flex; align-items: center; gap: 7px; font-size: .88rem; cursor: pointer; }
+.legend-item input { accent-color: var(--accent); }
+.swatch { width: 14px; height: 14px; border-radius: 4px; flex: none; }
+
 /* ---- Plain scrolling pages (teacher) ---- */
 body.page { overflow: auto; }
 .page-tag { font-size: .78rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 99px; padding: 2px 10px; }

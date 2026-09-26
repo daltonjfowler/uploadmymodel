@@ -183,7 +183,7 @@ class phrase, limits, warm-up.
 - One class period uses it. Fix what they trip on.
 
 ### Later, maybe
-- Layer-by-layer G-code preview.
+- ~~Layer-by-layer G-code preview.~~ Built 2026-09-26 (Preview tab; also opens any `.gcode`).
 - Auto-orient ("best side down"), several models on one plate.
 - A teacher queue: students submit, teacher approves and downloads.
 
