@@ -297,6 +297,11 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .name-field { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px; font-weight: 600; font-size: .9rem; }
 .name-field input { border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; background: var(--card2); min-width: 0; }
 .name-field input:focus { border-color: var(--accent); outline: none; }
+.file-input { display: flex; align-items: center; min-width: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--card2); }
+.file-input:focus-within { border-color: var(--accent); }
+.file-input input { flex: 1; min-width: 0; border: 0; background: none; padding: 7px 9px; outline: none; font: 13px ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.name-field .file-input input:focus { border: 0; }
+.file-ext { padding-right: 9px; color: var(--muted); font: 13px ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .file-name { margin: 0; font-size: .82rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .action-summary { margin: 0; font-size: .82rem; color: var(--muted); }
 .result { border-radius: 9px; padding: 9px 11px; font-size: .86rem; }

@@ -40,10 +40,12 @@ Settings with a 🔒 are set by your teacher.
 
 ## 5. Slice and save
 
-1. Type your first name (it goes in the file name).
+1. Type your first name. The **File name** fills itself in (your name + the model); change it if
+   you like. Keep it short so you can find it on the printer screen.
 2. Press **Slice**. Supports can take a minute.
 3. Look at **Preview**: drag the layer slider to watch your print build up.
-4. Press **Save to SD card**, pick the class SD card, then **eject it** before you pull it out.
+4. Press **Save to SD card**. In the window that opens, pick the class SD card and press Save.
+   Then **eject the card** before you pull it out.
 
 ## 6. Print
 

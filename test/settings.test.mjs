@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   CLASS_DEFAULTS, INFILL_PATTERNS, PRINTER, SETTINGS, TREE_SUPPORT_INFILL, applyClassLocks, checkAgainstClass, lockedRows,
-  safeNamePart, summarize, toCuraOverrides, validateClassConfig, validateSettings,
+  gcodeFileName, safeNamePart, summarize, toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
 import { checkPlateSTL } from '../src/worker.js';
 
@@ -69,6 +69,17 @@ test('locked temperature rows follow the layer height (4.13.2 quality files)', (
   assert.equal(nozzle('high_detail'), '210 °C (205 °C first layer)');
   assert.equal(nozzle('standard'), '215 °C (210 °C first layer)');
   assert.equal(nozzle('high_speed'), '215 °C (210 °C first layer)');
+});
+
+test('G-code file names: the student own name, or name-model', () => {
+  assert.equal(gcodeFileName('', 'Jordan', 'Rocket Ship'), 'jordan-rocket-ship.gcode');
+  assert.equal(gcodeFileName('', '', 'Rocket'), 'rocket.gcode');
+  assert.equal(gcodeFileName('My Rocket!!', 'Jordan', 'x'), 'my-rocket.gcode');
+  assert.equal(gcodeFileName('boat.gcode', 'Jordan', 'x'), 'boat.gcode');
+  assert.equal(gcodeFileName('../../evil', 'Jordan', 'x'), 'evil.gcode');
+  assert.equal(gcodeFileName('???', 'Jordan', 'Boat'), 'jordan-boat.gcode'); // nothing usable: default
+  assert.ok(gcodeFileName('a'.repeat(80), '', '').length <= 30 + 6);
+  assert.equal(gcodeFileName('', 'Alexandria-Rosemary', 'Very Long Model Name Here'), 'alexandria-rosemary-very-long.gcode');
 });
 
 test('safe file names', () => {

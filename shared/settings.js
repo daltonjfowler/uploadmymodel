@@ -262,10 +262,12 @@ export const LIMITS = {
   maxTriangles: 800_000,
   maxObjects: 12,
   maxNameLength: 24,
+  // A whole G-code file name, without ".gcode". Short names are easier to find on the printer screen.
+  maxFileNameLength: 30,
 };
 
 /** Student name → safe file name part: lowercase letters, digits, dashes. */
-export function safeNamePart(text, fallback = 'model') {
+export function safeNamePart(text, fallback = 'model', max = LIMITS.maxNameLength) {
   const cleaned = String(text ?? '')
     .normalize('NFKD')
     .replace(/[^\w\s-]/g, '')
@@ -274,8 +276,21 @@ export function safeNamePart(text, fallback = 'model') {
     .replace(/[\s_]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
-    .slice(0, LIMITS.maxNameLength);
+    .slice(0, max)
+    .replace(/-$/, '');
   return cleaned || fallback;
+}
+
+/**
+ * The file name for the SD card. The student's own name for the file if they typed one, else
+ * "student-model". Always plain letters, digits and dashes, and it always ends in ".gcode".
+ */
+export function gcodeFileName(custom, student, model) {
+  const own = safeNamePart(String(custom ?? '').replace(/\.gcode$/i, ''), '', LIMITS.maxFileNameLength);
+  if (own) return `${own}.gcode`;
+  const who = safeNamePart(student, '');
+  const what = safeNamePart(model, 'model');
+  return `${safeNamePart(`${who ? `${who}-` : ''}${what}`, 'model', LIMITS.maxFileNameLength)}.gcode`;
 }
 
 // ---- The teacher's class setup (stored in KV, set on /teacher/) -------------------------------
