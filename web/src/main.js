@@ -120,8 +120,12 @@ async function loadFiles(files) {
     await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
     try {
       const { name, positions } = await loadModelFile(file);
+      const plateTris = viewer.models.reduce((n, m) => n + m.triangles, 0);
       if (positions.length / 9 > LIMITS.maxTriangles) {
         throw new LoadError(`"${file.name}" has ${fmt(positions.length / 9)} triangles. The most is ${fmt(LIMITS.maxTriangles)}. Export it with lower detail.`);
+      }
+      if (plateTris + positions.length / 9 > LIMITS.maxTriangles) {
+        throw new LoadError(`With "${file.name}" the plate would have too much detail to slice (${fmt(plateTris + positions.length / 9)} triangles, the most is ${fmt(LIMITS.maxTriangles)}). Remove a model first.`);
       }
       const model = viewer.addModel(name, positions);
       checkUnits(model);
@@ -140,7 +144,7 @@ function checkUnits(model) {
   const biggest = Math.max(s.x, s.y, s.z);
   if (biggest < 8) {
     toast(`"${model.name}" is tiny (${fmt(biggest, 1)} mm). Was it made in inches?`, {
-      action: () => viewer.transaction('inches to mm', () => {
+      action: () => viewer.models.includes(model) && viewer.transaction('inches to mm', () => {
         viewer.setScale(model, 2540, 2540, 2540);
         viewer.moveToFreeSpot(model);
       }),
@@ -150,7 +154,7 @@ function checkUnits(model) {
   } else if (!viewer.checkFit(model)) {
     toast(`"${model.name}" is bigger than the printer.`, {
       kind: 'warn',
-      action: () => viewer.scaleToFit(model),
+      action: () => viewer.models.includes(model) && viewer.scaleToFit(model),
       actionLabel: 'Shrink to fit',
       timeout: 15000,
     });
@@ -189,7 +193,20 @@ function setTool(name) {
 for (const b of document.querySelectorAll('.tool[data-tool]')) {
   b.addEventListener('click', () => setTool(b.dataset.tool));
 }
-$('#dupBtn').addEventListener('click', () => viewer.duplicateSelected());
+// Copies count against the plate limits like opened files do.
+function duplicateSelected() {
+  const list = viewer.selectedList;
+  const tris = viewer.models.reduce((n, m) => n + m.triangles, 0) + list.reduce((n, m) => n + m.triangles, 0);
+  if (viewer.models.length + list.length > LIMITS.maxObjects) {
+    toast(`That would be more than ${LIMITS.maxObjects} objects, the most for one plate.`, { kind: 'error' });
+  } else if (tris > LIMITS.maxTriangles) {
+    toast('That would be too much detail on one plate to slice. Copy fewer models.', { kind: 'error' });
+  } else {
+    viewer.duplicateSelected();
+  }
+}
+
+$('#dupBtn').addEventListener('click', duplicateSelected);
 
 // ---- Undo / redo ------------------------------------------------------------------------------
 
@@ -256,7 +273,7 @@ function renderGroupPanel(p) {
   for (const pct of [50, 100, 200]) {
     scale.append(button(`${pct}%`, each('scale', (m) => viewer.setScale(m, pct, pct, pct))));
   }
-  scale.append(button('Fit bed', each('fit to bed', (m) => viewer.scaleToFit(m))));
+  scale.append(button('Fit bed', each('fit to bed', (m) => viewer.scaleToFit(m, { center: false }))));
   p.append(el('span', { class: 'sub-label' }, 'Scale each (from its file size)'), scale);
   p.append(button('⊕ Center the group on the bed', () => viewer.centerSelected(), 'wide'));
   p.append(button('▦ Arrange everything', () => viewer.arrangeAll(), 'wide'));
@@ -384,7 +401,15 @@ $('#clearPlate').addEventListener('click', () => {
   if (!viewer.models.length) return;
   const removed = viewer.models.length;
   viewer.clear();
-  toast(`Cleared ${removed} object${removed === 1 ? '' : 's'}.`, { action: undo, actionLabel: 'Undo', key: 'history' });
+  const entry = viewer.undoStack.at(-1);
+  toast(`Cleared ${removed} object${removed === 1 ? '' : 's'}.`, {
+    action: () => {
+      if (viewer.undoStack.at(-1) === entry) undo();
+      else toast('Something else changed since then. Use the Undo button to step back.', { key: 'history' });
+    },
+    actionLabel: 'Undo',
+    key: 'history',
+  });
 });
 
 function renderObjects() {
@@ -637,7 +662,9 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (typing || document.querySelector('dialog[open]')) return;
-  if (stage === 'preview' && !ctrl) {
+  if (viewer.busy) return; // mid-drag: finish the drag first
+  if (stage === 'preview') {
+    if (ctrl) return; // the plate is hidden: no undo, copy or arrange on it from here
     const step = e.shiftKey ? 10 : 1;
     const moves = { ArrowUp: step, ArrowRight: step, ArrowDown: -step, ArrowLeft: -step, PageUp: 10, PageDown: -10 };
     if (e.key in moves) {
@@ -659,7 +686,7 @@ window.addEventListener('keydown', (e) => {
     redo();
   } else if (ctrl && key === 'd') {
     e.preventDefault();
-    viewer.duplicateSelected();
+    duplicateSelected();
   } else if (ctrl && key === 'a') {
     e.preventDefault();
     viewer.selectAll();

@@ -10,7 +10,9 @@ import {
 import { el, esc } from './dom.js';
 import { patternIcon } from './pattern-icons.js';
 
-const STORE_SETTINGS = 'umm.settings';
+// Only the settings the student changed are stored, so everything else follows the teacher's
+// class defaults, even when the teacher changes them later.
+const STORE_SETTINGS = 'umm.mySettings';
 const STORE_MODE = 'umm.settingsMode';
 const STORE_OPEN = 'umm.settingsOpen';
 
@@ -64,8 +66,12 @@ export class SettingsPanel extends EventTarget {
     this.hint = hint;
     // The teacher's class setup; replaced by setClassConfig() once /api/class answers.
     this.config = DEFAULT_CLASS_CONFIG;
-    const stored = validateSettings(load(STORE_SETTINGS, {}));
-    this.settings = stored.ok ? stored.settings : { ...this.config.defaults };
+    const raw = load(STORE_SETTINGS, {});
+    const stored = validateSettings(raw);
+    // Keep only keys that were really stored (validateSettings fills the rest with defaults).
+    this.mine = stored.ok ? Object.fromEntries(Object.keys(raw).filter((k) => k in stored.settings).map((k) => [k, stored.settings[k]])) : {};
+    this.settings = applyClassLocks({ ...this.config.defaults, ...this.mine }, this.config);
+    if (this.settings.support !== 'none') this.lastPlacement = this.settings.support;
     this.mode = load(STORE_MODE, 'recommended') === 'custom' ? 'custom' : 'recommended';
     this.open = load(STORE_OPEN, true) !== false;
     this.openSections = new Set(['quality', 'infill', 'support']);
@@ -81,7 +87,11 @@ export class SettingsPanel extends EventTarget {
   set(id, value) {
     if (this.settings[id] === value) return;
     this.settings = { ...this.settings, [id]: value };
-    save(STORE_SETTINGS, this.settings);
+    // Back at the class default = not the student's own choice any more.
+    if (value === this.config.defaults[id]) delete this.mine[id];
+    else this.mine[id] = value;
+    if (id === 'support' && value !== 'none') this.lastPlacement = value;
+    save(STORE_SETTINGS, this.mine);
     this.render();
     this.dispatchEvent(new Event('change'));
   }
@@ -92,8 +102,8 @@ export class SettingsPanel extends EventTarget {
     if (!v.ok) return;
     this.config = v.config;
     const before = JSON.stringify(this.settings);
-    this.settings = applyClassLocks(this.settings, this.config);
-    save(STORE_SETTINGS, this.settings);
+    this.settings = applyClassLocks({ ...this.config.defaults, ...this.mine }, this.config);
+    if (this.settings.support !== 'none') this.lastPlacement = this.settings.support;
     this.render();
     if (JSON.stringify(this.settings) !== before) this.dispatchEvent(new Event('change'));
   }
@@ -113,7 +123,8 @@ export class SettingsPanel extends EventTarget {
 
   reset() {
     this.settings = { ...this.config.defaults };
-    save(STORE_SETTINGS, this.settings);
+    this.mine = {};
+    save(STORE_SETTINGS, this.mine);
     this.render();
     this.dispatchEvent(new Event('change'));
   }
@@ -130,6 +141,10 @@ export class SettingsPanel extends EventTarget {
 
   render() {
     const scroll = this.root.querySelector('.settings-body')?.scrollTop ?? 0;
+    // Re-rendering replaces every control; give focus back to the same one afterwards, or the
+    // next arrow key would go to the page (and move the model) instead of the slider.
+    const active = this.root.contains(document.activeElement) ? document.activeElement : null;
+    const focusKey = active ? `${active.tagName}|${active.getAttribute('aria-label') ?? active.textContent.trim()}` : null;
     const changed = !isClassDefault(this.settings, this.config.defaults);
     this.root.classList.toggle('collapsed', !this.open);
     clearTimeout(this.hintTimer);
@@ -181,6 +196,11 @@ export class SettingsPanel extends EventTarget {
     foot.append(reset);
     this.root.append(foot);
     body.scrollTop = scroll;
+    if (focusKey) {
+      const again = [...this.root.querySelectorAll('button, input, select')]
+        .find((n) => `${n.tagName}|${n.getAttribute('aria-label') ?? n.textContent.trim()}` === focusKey);
+      again?.focus({ preventScroll: true });
+    }
   }
 
   renderRecommended(body) {

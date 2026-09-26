@@ -132,8 +132,9 @@ async function handleTeacher(request, env, url) {
   if (url.pathname !== '/api/teacher/class') return json(404, { error: 'not_found', message: 'No such API.' });
   if (request.method === 'GET') return json(200, await readClassConfig(env));
   if (request.method !== 'PUT') return json(405, { error: 'method', message: 'Use GET or PUT.' });
-  const text = await request.text();
-  if (text.length > MAX_TEACHER_BYTES) return json(413, { error: 'size', message: 'That is too much to save.' });
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength > MAX_TEACHER_BYTES) return json(413, { error: 'size', message: 'That is too much to save.' });
+  const text = new TextDecoder().decode(bytes);
   let body;
   try {
     body = JSON.parse(text);
@@ -181,8 +182,11 @@ export function checkPlateSTL(buf) {
 }
 
 async function handleSlice(request, env) {
-  const length = Number(request.headers.get('content-length') ?? '0');
-  if (length > LIMITS.maxUploadBytes + 64 * 1024) {
+  // Browsers always send the length for a form upload; without it the whole body would be read
+  // before any size check.
+  if (!request.headers.has('content-length')) return refuse(411, 'The upload did not say how big it is. Reload and try again.');
+  const length = Number(request.headers.get('content-length'));
+  if (!(length >= 0) || length > LIMITS.maxUploadBytes + 64 * 1024) {
     return refuse(413, `That plate is too big to send (the most is ${LIMITS.maxUploadBytes / 1048576} MB).`);
   }
   let form;

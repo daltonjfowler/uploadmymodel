@@ -41,10 +41,12 @@ def flat_def(name, values, extruder_id=None):
     return d
 
 
-def main():
-    resolved, model, out = sys.argv[1:4]
-    overrides = dict(a.split("=", 1) for a in sys.argv[4:])
-    r = json.load(open(resolved))
+def slice_file(r, model, out, overrides=None, workdir=None, timeout=None):
+    """Slice `model` (STL) to `out` with resolved settings `r` (resolve.resolve()). Returns
+    {"exit", "seconds", "header", "filament_mm3", "grams", "log"}; exit != 0 means the engine failed
+    and `out` is not usable. `workdir` holds the flat definition files (default: flat/ here)."""
+    overrides = overrides or {}
+    workdir = workdir or os.path.join(HERE, "flat")
     g, e = dict(r["global"]), dict(r["extruder0"])
     if os.environ.get("USE_GOLDEN_START") == "1":
         start, end = school_start_end()
@@ -55,33 +57,49 @@ def main():
         g[k] = v
         if k in e:
             e[k] = v
-    os.makedirs(os.path.join(HERE, "flat"), exist_ok=True)
-    json.dump(flat_def("flat_extruder", e), open(os.path.join(HERE, "flat", "flat_extruder.def.json"), "w"), indent=1)
-    json.dump(flat_def("flat_machine", g, "flat_extruder"), open(os.path.join(HERE, "flat", "flat_machine.def.json"), "w"), indent=1)
+    os.makedirs(workdir, exist_ok=True)
+    json.dump(flat_def("flat_extruder", e), open(os.path.join(workdir, "flat_extruder.def.json"), "w"), indent=1)
+    json.dump(flat_def("flat_machine", g, "flat_extruder"), open(os.path.join(workdir, "flat_machine.def.json"), "w"), indent=1)
 
-    env = dict(os.environ, CURA_ENGINE_SEARCH_PATH=os.path.join(HERE, "flat"))
-    cmd = [ENGINE, "slice", "-v", "-j", os.path.join(HERE, "flat", "flat_machine.def.json"), "-l", model, "-o", out]
+    env = dict(os.environ, CURA_ENGINE_SEARCH_PATH=workdir)
+    cmd = [ENGINE, "slice", "-v", "-j", os.path.join(workdir, "flat_machine.def.json"), "-l", model, "-o", out]
     t = time.time()
-    p = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
     dt = time.time() - t
     log = p.stdout + p.stderr
-    open(out + ".log", "w").write(log)
-    print("exit", p.returncode, f"{dt:.2f}s")
+    result = {"exit": p.returncode, "seconds": dt, "log": log, "header": None, "filament_mm3": None, "grams": None}
     m = re.search(r"Gcode header after slicing:\n(.*?)End of gcode header.", log, re.S)
+    f = re.search(r"Filament \(mm\^3\): ([0-9.]+)", log)
+    if p.returncode != 0 or not m or not f:
+        result["exit"] = p.returncode or -1
+        return result
     header = m.group(1)
-    mm3 = float(re.search(r"Filament \(mm\^3\): ([0-9.]+)", log).group(1))
-    print(header)
+    mm3 = float(f.group(1))
     # Post-process like Cura's frontend: real header, filament weight token, (print_job_name).
-    dia = float(e["material_diameter"])
-    density = r["material"]["density"]
-    grams = mm3 / 1000 * density
+    grams = mm3 / 1000 * r["material"]["density"]
     data = open(out, "rb").read().decode("utf-8")
     nl = "\r\n" if "\r\n" in data else "\n"
     head_end = data.index(";Generated with")
     data = header.replace("\n", nl) + data[head_end:].lstrip("\r\n")
     data = data.replace("{filament_weight}", "~" + str(round(grams, 2)) + "g")
     open(out, "wb").write(data.encode("utf-8"))
-    print(f"filament {mm3:.0f} mm3 = {mm3 / (3.14159265 * (dia / 2) ** 2) / 1000:.5f} m = {grams:.2f} g")
+    result.update(header=header, filament_mm3=mm3, grams=grams)
+    return result
+
+
+def main():
+    resolved, model, out = sys.argv[1:4]
+    overrides = dict(a.split("=", 1) for a in sys.argv[4:])
+    r = json.load(open(resolved))
+    res = slice_file(r, model, out, overrides)
+    open(out + ".log", "w").write(res["log"])
+    print("exit", res["exit"], f"{res['seconds']:.2f}s")
+    if res["exit"] != 0:
+        sys.exit(1)
+    print(res["header"])
+    dia = float(r["extruder0"]["material_diameter"])
+    mm3 = res["filament_mm3"]
+    print(f"filament {mm3:.0f} mm3 = {mm3 / (3.14159265 * (dia / 2) ** 2) / 1000:.5f} m = {res['grams']:.2f} g")
 
 
 if __name__ == "__main__":

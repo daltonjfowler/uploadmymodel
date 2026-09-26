@@ -322,12 +322,19 @@ export class Viewer extends EventTarget {
     const deg = Math.round(THREE.MathUtils.radToDeg(d.total) / 15) * 15;
     if (deg !== d.snapped) {
       d.snapped = deg;
-      // Preview: turn the mesh about the model's middle. On release the turn is baked for real.
+      // Preview: turn about the model's middle, then scale, in that order, because that is what
+      // baking does (turns go into the shape, scale stays along the printer's axes). three's own
+      // position/rotation/scale would scale first, which looks wrong on a stretched model.
       const m = d.model;
-      const q = new THREE.Quaternion().setFromAxisAngle(d.n, THREE.MathUtils.degToRad(deg));
-      const c = new THREE.Vector3(0, 0, m.size.z / 2);
-      m.mesh.quaternion.copy(q);
-      m.mesh.position.copy(d.startPos).add(c).sub(c.clone().applyQuaternion(q));
+      const c = new THREE.Vector3(0, 0, m.baseSize.z / 2);
+      const turn = new THREE.Matrix4().makeRotationAxis(d.n, THREE.MathUtils.degToRad(deg));
+      m.mesh.matrixAutoUpdate = false;
+      m.mesh.matrix.makeTranslation(d.startPos.x, d.startPos.y, 0)
+        .multiply(new THREE.Matrix4().makeScale(m.mesh.scale.x, m.mesh.scale.y, m.mesh.scale.z))
+        .multiply(new THREE.Matrix4().makeTranslation(c.x, c.y, c.z))
+        .multiply(turn)
+        .multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
+      m.mesh.matrixWorldNeedsUpdate = true;
       this.requestRender();
     }
     const rect = this.canvas.getBoundingClientRect();
@@ -342,8 +349,9 @@ export class Viewer extends EventTarget {
     this.ringDrag = null;
     this.angleLabel.hidden = true;
     for (const part of Object.values(this.ringParts)) part.vis.material.opacity = 0.95;
-    d.model.mesh.quaternion.identity();
+    d.model.mesh.matrixAutoUpdate = true;
     d.model.mesh.position.copy(d.startPos);
+    d.model.mesh.updateMatrix();
     if (d.snapped % 360 !== 0) this.rotate(d.model, d.axis, d.snapped);
     else this.changed();
   }
@@ -534,9 +542,26 @@ export class Viewer extends EventTarget {
       return;
     }
     this.undoStack.push(entry);
-    if (this.undoStack.length > 60) this.undoStack.shift();
+    const dropped = this.redoStack;
+    if (this.undoStack.length > 60) dropped.push(this.undoStack.shift());
     this.redoStack = [];
+    this.release(dropped);
     this.emit('history');
+  }
+
+  // History entries that add or remove models list them in `models`. When entries are dropped
+  // (redo cleared by a new change, or the oldest undo trimmed), a model that is off the plate and
+  // named by no remaining entry can never come back: free its GPU buffers.
+  release(entries) {
+    const gone = new Set(entries.flatMap((e) => e.models ?? []));
+    if (!gone.size) return;
+    for (const e of [...this.undoStack, ...this.redoStack]) for (const m of e.models ?? []) gone.delete(m);
+    for (const m of gone) {
+      if (this.models.includes(m)) continue;
+      m.geometry.disposeBoundsTree?.();
+      m.geometry.dispose();
+      m.material.dispose();
+    }
   }
 
   /** Run fn so that everything it changes is one Undo step. */
@@ -554,6 +579,7 @@ export class Viewer extends EventTarget {
           label,
           undo: () => [...list].reverse().forEach((e) => e.undo()),
           redo: () => list.forEach((e) => e.redo()),
+          models: list.flatMap((e) => e.models ?? []),
         });
       }
     }
@@ -611,7 +637,7 @@ export class Viewer extends EventTarget {
     this.paint(model);
     this.placeFree(model);
     this.attach(model);
-    this.record({ label: `add ${name}`, undo: () => this.detach(model), redo: () => this.attach(model) });
+    this.record({ label: `add ${name}`, undo: () => this.detach(model), redo: () => this.attach(model), models: [model] });
     this.changed();
     return model;
   }
@@ -620,7 +646,7 @@ export class Viewer extends EventTarget {
     if (!model) return;
     const index = this.detach(model);
     if (index < 0) return;
-    this.record({ label: `delete ${model.name}`, undo: () => this.attach(model, index), redo: () => this.detach(model) });
+    this.record({ label: `delete ${model.name}`, undo: () => this.attach(model, index), redo: () => this.detach(model), models: [model] });
     this.changed();
   }
 
@@ -639,7 +665,7 @@ export class Viewer extends EventTarget {
     this.paint(copy);
     this.placeFree(copy);
     this.attach(copy);
-    this.record({ label: `copy ${model.name}`, undo: () => this.detach(copy), redo: () => this.attach(copy) });
+    this.record({ label: `copy ${model.name}`, undo: () => this.detach(copy), redo: () => this.attach(copy), models: [copy] });
     this.changed();
     return copy;
   }
@@ -985,14 +1011,17 @@ export class Viewer extends EventTarget {
   }
 
   /** Make the model fit inside the bed (with margin), keeping its shape. */
-  scaleToFit(model) {
+  /** Shrink a model that is too big for the printer (keeping its shape). One that fits is left
+   *  alone. `center`: also move it to the middle (not for a group, or they would pile up). */
+  scaleToFit(model, { center = true } = {}) {
     const s = model.size;
     const lim = this.limits();
-    const f = Math.min((lim.x * 2) / s.x, (lim.y * 2) / s.y, this.printer.bed.z / s.z, 1) * 0.98;
+    const fit = Math.min((lim.x * 2) / s.x, (lim.y * 2) / s.y, this.printer.bed.z / s.z);
+    const f = fit >= 1 ? 1 : fit * 0.98;
     const sc = model.mesh.scale;
     this.transaction('fit to bed', () => {
-      this.setScale(model, sc.x * f * 100, sc.y * f * 100, sc.z * f * 100);
-      this.setPosition(model, 0, 0);
+      if (f !== 1) this.setScale(model, sc.x * f * 100, sc.y * f * 100, sc.z * f * 100);
+      if (center) this.setPosition(model, 0, 0);
     });
   }
 
@@ -1061,7 +1090,18 @@ export class Viewer extends EventTarget {
     return this.raycaster.ray.intersectPlane(plane, new THREE.Vector3());
   }
 
+  /** True while a model or a rotate ring is being dragged: plate keys must wait. */
+  get busy() {
+    return !!(this.drag || this.ringDrag);
+  }
+
   onPointerDown(e) {
+    if (this.busy) {
+      // A second finger (touch screen) while dragging: ignore it, or the drag would restart
+      // without recording the first move.
+      e.stopImmediatePropagation();
+      return;
+    }
     this.down = { x: e.clientX, y: e.clientY };
     if (this.stage === 'preview') return; // the camera still works; models cannot be touched
     if (e.button !== 0 || e.shiftKey) return; // right-drag and Shift + drag pan the camera

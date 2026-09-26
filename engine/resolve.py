@@ -244,17 +244,10 @@ def keys_of(props):
     return [k for k, p in props.items() if p.get("type") not in (None, "category")]
 
 
-def main():
-    quality = sys.argv[1] if len(sys.argv) > 1 else "high_detail"
-    out_prefix = sys.argv[2] if len(sys.argv) > 2 else "resolved"
-    gl_user, ex_user, target = {}, {}, None
-    for a in sys.argv[3:]:
-        if a == "--e":
-            target = ex_user
-            continue
-        k, v = a.split("=", 1)
-        (target if target is not None else gl_user)[k] = v
-
+def resolve(quality="high_detail", gl_user=None, ex_user=None):
+    """Every final setting value for one slice, as {"global", "extruder0", "material"}. gl_user and
+    ex_user are the user layer (student choices), as strings like Cura stores them."""
+    gl_user, ex_user = dict(gl_user or {}), dict(ex_user or {})
     gprops, gmeta = load_definition(MACHINE)
     ext_id = gmeta["machine_extruder_trains"]["0"]
     eprops, _ = load_definition(ext_id)
@@ -308,8 +301,22 @@ def main():
     e_values = {k: to_engine(estack.value(k)) for k in sorted(e_keys)}
     e_values["material_guid"] = mat_meta["GUID"]
 
-    json.dump({"global": g_values, "extruder0": e_values, "material": mat_meta}, open(out_prefix + ".json", "w"), indent=1)
-    print(f"wrote {out_prefix}.json: {len(g_values)} global, {len(e_values)} extruder settings")
+    return {"global": g_values, "extruder0": e_values, "material": mat_meta}
+
+
+def main():
+    quality = sys.argv[1] if len(sys.argv) > 1 else "high_detail"
+    out_prefix = sys.argv[2] if len(sys.argv) > 2 else "resolved"
+    gl_user, ex_user, target = {}, {}, None
+    for a in sys.argv[3:]:
+        if a == "--e":
+            target = ex_user
+            continue
+        k, v = a.split("=", 1)
+        (target if target is not None else gl_user)[k] = v
+    r = resolve(quality, gl_user, ex_user)
+    json.dump(r, open(out_prefix + ".json", "w"), indent=1)
+    print(f"wrote {out_prefix}.json: {len(r['global'])} global, {len(r['extruder0'])} extruder settings")
 
 
 if __name__ == "__main__":

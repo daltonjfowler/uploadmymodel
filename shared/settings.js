@@ -247,7 +247,8 @@ export function isClassDefault(settings, defaults = CLASS_DEFAULTS) {
 // Model limits the Worker enforces before any slicing (PLAN.md §4). Teacher-set later.
 export const LIMITS = {
   maxUploadBytes: 40 * 1024 * 1024,
-  maxTriangles: 1_500_000,
+  // For the whole plate. 40 MB of binary STL at 50 bytes per triangle is ~838k; keep under it.
+  maxTriangles: 800_000,
   maxObjects: 12,
   maxNameLength: 24,
 };
