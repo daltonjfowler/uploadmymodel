@@ -23,7 +23,8 @@ export const PRINTER = {
   // checked on the printer; Cura LE uses a few mm of "disallowed" border on the Workhorse.
   edgeMarginMm: 5,
   // Cura's support_angle for LulzBot (lulzbot.def.json): faces leaning past 60° from upright get
-  // support. The page paints those faces red, so "red" means what the slicer will hold up.
+  // support. It is the class default; students may change it (SUPPORT_ANGLE below). The page
+  // paints faces past the chosen angle red, so "red" means what the slicer will hold up.
   supportAngleDeg: 60,
 };
 
@@ -96,10 +97,15 @@ export const CLASS_DEFAULTS = Object.freeze({
   infillPattern: 'grid',
   walls: 2,
   support: 'buildplate',
+  supportAngle: 60,
   adhesion: 'skirt',
 });
 
 export const INFILL = { min: 0, max: 100, step: 5 };
+
+// Support overhang angle, measured from straight up. Cura LE warns below 40° (lulzbot.def.json);
+// past 80° almost nothing gets support and overhangs droop.
+export const SUPPORT_ANGLE = { min: 40, max: 80, step: 5 };
 
 // Tree supports are always hollow: 0% support infill (Dalton's rule, 2026-09-25). Not a setting.
 export const TREE_SUPPORT_INFILL = 0;
@@ -116,7 +122,7 @@ export const SETTINGS = [
     help: 'How many outlines go around the outside of your model. More walls make it stronger.',
   },
   {
-    id: 'infillDensity', section: 'infill', label: 'Infill density', kind: 'range', unit: '%', ...INFILL,
+    id: 'infillDensity', section: 'infill', label: 'Infill density', kind: 'range', unit: '%', tickStep: 20, ...INFILL,
     help: 'How full the inside is. 0% is hollow, 100% is solid. 15 to 25% is right for most prints.',
   },
   {
@@ -125,7 +131,11 @@ export const SETTINGS = [
   },
   {
     id: 'support', section: 'support', label: 'Tree supports', kind: 'choice', options: SUPPORT_CHOICES,
-    help: 'Supports hold up parts that hang in the air, like a chin or an arm. Parts that lean more than 45° usually need them. They are shown red on your model.',
+    help: 'Supports hold up parts that hang in the air, like a chin or an arm. They are shown red on your model.',
+  },
+  {
+    id: 'supportAngle', section: 'support', label: 'Support overhang angle', kind: 'range', unit: '°', tickStep: 10, ...SUPPORT_ANGLE,
+    help: 'Parts that lean further than this from straight up get supports. A smaller angle means more supports (safer, more plastic). A bigger angle means fewer supports (faster, but overhangs may droop). Watch the red on your model change.',
   },
   {
     id: 'adhesion', section: 'adhesion', label: 'Build plate adhesion', kind: 'choice', options: ADHESION_CHOICES,
@@ -215,6 +225,7 @@ export function toCuraOverrides(settings) {
     support_structure: 'tree',
     support_type: s.support === 'everywhere' ? 'everywhere' : 'buildplate',
     support_infill_rate: TREE_SUPPORT_INFILL,
+    support_angle: s.supportAngle,
     adhesion_type: s.adhesion,
   };
 }
@@ -223,7 +234,9 @@ export function toCuraOverrides(settings) {
 export function summarize(settings) {
   const s = { ...CLASS_DEFAULTS, ...settings };
   const q = qualityById(s.quality);
-  const support = s.support === 'none' ? 'No support' : 'Tree support';
+  let support = s.support === 'none' ? 'No support' : 'Tree support';
+  if (s.support === 'everywhere') support += ' everywhere';
+  if (s.support !== 'none' && s.supportAngle !== CLASS_DEFAULTS.supportAngle) support += ` ${s.supportAngle}°`;
   return `${q.layerMm.toFixed(2)} mm · ${s.infillDensity}% · ${support} · ${byId(ADHESION_CHOICES, s.adhesion).label}`;
 }
 

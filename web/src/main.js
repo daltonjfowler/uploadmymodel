@@ -523,10 +523,22 @@ viewer.addEventListener('dragging', () => {
 viewer.addEventListener('layflatpick', () => {
   if (tool === 'rotate') renderTools();
 });
+// The support angle decides which faces are red. Follow the slider live while it is dragged.
+function syncSupportAngle(angle = panel.value.supportAngle) {
+  viewer.setSupportAngle(angle);
+  panel.setPlateInfo({ overhangs: viewer.models.reduce((a, m) => a + m.overhangArea, 0), hasModels: viewer.models.length > 0 });
+}
+
+// Live: repaint only. The panel's advice updates on release, so the slider is not rebuilt mid-drag.
+panel.addEventListener('preview', (e) => {
+  if ('supportAngle' in e.detail) viewer.setSupportAngle(e.detail.supportAngle);
+});
 panel.addEventListener('change', () => {
+  syncSupportAngle();
   invalidateSlice();
   renderAction();
 });
+syncSupportAngle();
 
 $('#help').addEventListener('click', () => $('#helpDialog').showModal());
 $('#printerChip').addEventListener('click', () => $('#printerDialog').showModal());

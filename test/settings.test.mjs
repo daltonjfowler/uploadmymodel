@@ -11,10 +11,13 @@ import { checkPlateSTL } from '../src/worker.js';
 
 test('class defaults match the school profile current_lulzbot_9_18', () => {
   assert.deepEqual({ ...CLASS_DEFAULTS }, {
-    quality: 'high_detail', infillDensity: 20, infillPattern: 'grid', walls: 2, support: 'buildplate', adhesion: 'skirt',
+    quality: 'high_detail', infillDensity: 20, infillPattern: 'grid', walls: 2, support: 'buildplate', supportAngle: 60, adhesion: 'skirt',
   });
+  assert.equal(CLASS_DEFAULTS.supportAngle, PRINTER.supportAngleDeg);
   assert.equal(validateSettings(CLASS_DEFAULTS).ok, true);
   assert.equal(summarize(CLASS_DEFAULTS), '0.18 mm · 20% · Tree support · Skirt');
+  assert.equal(summarize({ support: 'everywhere', supportAngle: 45 }), '0.18 mm · 20% · Tree support everywhere 45° · Skirt');
+  assert.equal(summarize({ support: 'none', supportAngle: 45 }), '0.18 mm · 20% · No support · Skirt');
 });
 
 test('missing keys take the class default; unknown keys are dropped', () => {
@@ -29,6 +32,7 @@ test('values off the lists are refused, never fixed up', () => {
   for (const bad of [
     { infillDensity: 22 }, { infillDensity: 105 }, { infillDensity: -5 }, { infillDensity: '20' }, { infillDensity: 20.5 },
     { quality: 'ultra' }, { infillPattern: 'honeycomb' }, { support: 'normal' }, { adhesion: 'raft' }, { walls: 10 }, { walls: '2' },
+    { supportAngle: 35 }, { supportAngle: 85 }, { supportAngle: 62 }, { supportAngle: '60' },
   ]) {
     assert.equal(validateSettings(bad).ok, false, JSON.stringify(bad));
   }
@@ -54,6 +58,9 @@ test('Cura overrides: tree supports always 0% infill, temperatures never present
   const keys = Object.keys(toCuraOverrides(CLASS_DEFAULTS));
   for (const k of keys) assert.doesNotMatch(k, /temperature|speed|retract|gcode|fan|material/);
   assert.equal(toCuraOverrides({ quality: 'high_speed' }).quality_type, 'high speed');
+  assert.equal(toCuraOverrides(CLASS_DEFAULTS).support_angle, 60);
+  assert.equal(validateSettings({ supportAngle: 45 }).settings.supportAngle, 45);
+  assert.equal(toCuraOverrides({ supportAngle: 75 }).support_angle, 75);
   for (const p of INFILL_PATTERNS) assert.equal(toCuraOverrides({ infillPattern: p.id }).infill_pattern, p.id);
 });
 

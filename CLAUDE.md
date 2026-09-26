@@ -32,7 +32,8 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
 - Tree supports are always 0% support infill (Dalton's rule). Not a student setting.
 - Every plate change goes through a `Viewer` method that calls `record()` (or `transaction()` for
   several steps), so Undo works. Never move, scale or turn a model's mesh directly from `main.js`.
-- Overhang red uses LulzBot's support angle, 60° (`PRINTER.supportAngleDeg`), to match Cura LE.
+- Overhang red uses the student's support overhang angle (`supportAngle`, class default 60°, LulzBot's
+  Cura value), so red always means "will get support". The slider repaints live via 'preview' events.
 - Use this app's own KV namespace when one is added. Never reuse uploadmycode's or uploadmylaser's.
 
 ## Commands

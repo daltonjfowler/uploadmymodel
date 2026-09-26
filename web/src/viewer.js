@@ -697,6 +697,19 @@ export class Viewer extends EventTarget {
     if (best) this.pointDown(model, best.n);
   }
 
+  get supportAngle() {
+    return this.supportAngleDeg ?? this.printer.supportAngleDeg;
+  }
+
+  /** Faces leaning past this angle from straight up are painted red (they will get support). */
+  setSupportAngle(degrees) {
+    if (degrees === this.supportAngle) return;
+    this.supportAngleDeg = degrees;
+    this.overhangCos = Math.cos(THREE.MathUtils.degToRad(90 - degrees));
+    for (const m of this.models) this.paint(m);
+    this.requestRender();
+  }
+
   startLayFlatPick(on = true) {
     this.layFlatPicking = on;
     this.canvas.style.cursor = on ? 'crosshair' : '';

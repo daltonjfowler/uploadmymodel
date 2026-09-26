@@ -3,8 +3,8 @@
 // teacher's locked settings greyed out). Both tabs edit the same settings object.
 
 import {
-  ADHESION_CHOICES, CLASS_DEFAULTS, INFILL, INFILL_PATTERNS, LOCKED, QUALITIES, SECTIONS, SETTINGS,
-  TREE_SUPPORT_INFILL, isClassDefault, qualityById, summarize, validateSettings,
+  ADHESION_CHOICES, CLASS_DEFAULTS, INFILL_PATTERNS, LOCKED, QUALITIES, SECTIONS, SETTINGS,
+  SUPPORT_CHOICES, TREE_SUPPORT_INFILL, isClassDefault, qualityById, summarize, validateSettings,
 } from '../../shared/settings.js';
 import { el, esc } from './dom.js';
 import { patternIcon } from './pattern-icons.js';
@@ -37,6 +37,17 @@ function infillWords(v) {
   if (v < 100) return 'Very strong and heavy. Slow.';
   return 'Solid plastic. Heaviest and slowest.';
 }
+
+function angleWords(v) {
+  if (v <= 45) return 'Lots of support. Even gentle slopes get held up. Uses more plastic.';
+  if (v <= 55) return 'More support than normal. Safer for tricky models.';
+  if (v === 60) return 'Class default. Right for most models.';
+  if (v <= 70) return 'Less support. Steep slopes print on their own but may droop a little.';
+  return 'Very little support. Only nearly flat overhangs get held up. Expect droop.';
+}
+
+const WORDS = { infillDensity: infillWords, supportAngle: angleWords };
+const defOf = (id) => SETTINGS.find((d) => d.id === id);
 
 export class SettingsPanel extends EventTarget {
   constructor(root, hint) {
@@ -137,7 +148,7 @@ export class SettingsPanel extends EventTarget {
     const q = qualityById(s.quality);
 
     // Print quality: three big buttons, like picking a Cura profile.
-    const quality = this.block(body, 'Print quality', SETTINGS[0]);
+    const quality = this.block(body, 'Print quality', defOf('quality'));
     const seg = el('div', { class: 'seg quality' });
     for (const opt of QUALITIES) {
       const b = el('button', { type: 'button', class: s.quality === opt.id ? 'on' : '' });
@@ -149,19 +160,25 @@ export class SettingsPanel extends EventTarget {
     quality.append(seg, el('p', { class: 'note' }, q.blurb));
 
     // Infill slider.
-    const infill = this.block(body, 'Infill', SETTINGS[2]);
-    infill.append(this.infillSlider());
+    const infill = this.block(body, 'Infill', defOf('infillDensity'));
+    infill.append(this.rangeSlider('infillDensity'));
 
-    // Supports.
-    const support = this.block(body, 'Support', SETTINGS[4]);
-    support.append(this.toggle('Tree supports', s.support !== 'none', (on) => {
-      this.set('support', on ? (s.support === 'none' ? 'buildplate' : s.support) : 'none');
-    }, 'Hollow tree branches hold up parts that hang in the air.'));
+    // Supports: on/off, then where they may grow and from what angle.
+    const support = this.block(body, 'Support', defOf('support'));
+    support.append(this.supportToggle());
+    if (s.support !== 'none') {
+      support.append(this.placementPicker());
+      const angle = el('div', { class: 'sub-setting' });
+      angle.append(el('span', { class: 'sub-label' }, 'Support overhang angle'));
+      angle.append(this.rangeSlider('supportAngle', true));
+      this.hintOn(angle, defOf('supportAngle').label, defOf('supportAngle').help);
+      support.append(angle);
+    }
     const advice = this.supportAdvice();
     if (advice) support.append(advice);
 
     // Adhesion.
-    const adhesion = this.block(body, 'Adhesion', SETTINGS[5]);
+    const adhesion = this.block(body, 'Adhesion', defOf('adhesion'));
     adhesion.append(this.toggle('Brim', s.adhesion === 'brim', (on) => this.set('adhesion', on ? 'brim' : 'skirt'),
       ADHESION_CHOICES.find((a) => a.id === 'brim').blurb));
   }
@@ -181,7 +198,8 @@ export class SettingsPanel extends EventTarget {
       wrap.append(head);
       if (open) {
         const rows = el('div', { class: 'cat-rows' });
-        for (const def of SETTINGS.filter((d) => d.section === sec.id)) rows.append(this.customRow(def));
+        if (sec.id === 'support') this.supportRows(rows, s);
+        else for (const def of SETTINGS.filter((d) => d.section === sec.id)) rows.append(this.customRow(def));
         this.extraRows(sec.id, rows, s);
         wrap.append(rows);
       }
@@ -219,6 +237,42 @@ export class SettingsPanel extends EventTarget {
     }
   }
 
+  // Custom mode's Support section, laid out like Cura's: the switch, then the settings that only
+  // matter when supports are on.
+  supportRows(rows, s) {
+    const on = el('div', { class: 'row' });
+    on.append(el('span', { class: 'row-label' }, 'Generate support'), this.supportToggle(''));
+    this.hintOn(on, 'Generate support', defOf('support').help);
+    rows.append(on);
+    if (s.support === 'none') return;
+    const place = el('div', { class: 'row wide' });
+    place.append(el('span', { class: 'row-label' }, 'Support placement'), this.placementPicker());
+    rows.append(place);
+    rows.append(this.customRow(defOf('supportAngle')));
+  }
+
+  supportToggle(label = 'Tree supports') {
+    const s = this.settings;
+    return this.toggle(label, s.support !== 'none', (on) => {
+      this.set('support', on ? (this.lastPlacement ?? 'buildplate') : 'none');
+    }, label ? 'Hollow tree branches hold up parts that hang in the air.' : undefined);
+  }
+
+  placementPicker() {
+    const seg = el('div', { class: 'seg placement', role: 'radiogroup', 'aria-label': 'Support placement' });
+    for (const opt of SUPPORT_CHOICES.filter((o) => o.id !== 'none')) {
+      const on = this.settings.support === opt.id;
+      const b = el('button', { type: 'button', role: 'radio', 'aria-checked': String(on), class: on ? 'on' : '' }, opt.label);
+      b.addEventListener('click', () => {
+        this.lastPlacement = opt.id;
+        this.set('support', opt.id);
+      });
+      this.hintOn(b, opt.label, opt.blurb);
+      seg.append(b);
+    }
+    return seg;
+  }
+
   customRow(def) {
     const row = el('div', { class: 'row' });
     const label = el('span', { class: 'row-label' }, def.label);
@@ -226,7 +280,7 @@ export class SettingsPanel extends EventTarget {
     const value = this.settings[def.id];
     if (def.kind === 'range') {
       row.classList.add('wide');
-      row.append(this.infillSlider(true));
+      row.append(this.rangeSlider(def.id, true));
     } else if (def.id === 'infillPattern') {
       row.classList.add('wide');
       row.append(this.patternPicker());
@@ -255,29 +309,36 @@ export class SettingsPanel extends EventTarget {
     return r;
   }
 
-  infillSlider(compact = false) {
-    const v = this.settings.infillDensity;
+  // A stepped slider for a 'range' setting. While it is being dragged it sends 'preview' events,
+  // so the 3D view can follow along (the support angle repaints the red live).
+  rangeSlider(id, compact = false) {
+    const def = defOf(id);
+    const v = this.settings[id];
+    const describe = WORDS[id] ?? (() => '');
+    const pct = (x) => `${((x - def.min) / (def.max - def.min)) * 100}%`;
     const wrap = el('div', { class: `slider ${compact ? 'compact' : ''}` });
     const input = el('input', {
-      type: 'range', min: INFILL.min, max: INFILL.max, step: INFILL.step, value: v, 'aria-label': 'Infill density',
+      type: 'range', min: def.min, max: def.max, step: def.step, value: v, 'aria-label': def.label,
     });
-    input.style.setProperty('--pct', `${v}%`);
-    const out = el('output', { class: 'slider-value' }, `${v}%`);
+    input.style.setProperty('--pct', pct(v));
+    const out = el('output', { class: 'slider-value' }, `${v}${def.unit}`);
     input.addEventListener('input', () => {
-      out.textContent = `${input.value}%`;
-      input.style.setProperty('--pct', `${input.value}%`);
-      words.textContent = infillWords(Number(input.value));
+      const x = Number(input.value);
+      out.textContent = `${x}${def.unit}`;
+      input.style.setProperty('--pct', pct(x));
+      words.textContent = describe(x);
+      this.dispatchEvent(new CustomEvent('preview', { detail: { [id]: x } }));
     });
-    input.addEventListener('change', () => this.set('infillDensity', Number(input.value)));
+    input.addEventListener('change', () => this.set(id, Number(input.value)));
     const top = el('div', { class: 'slider-row' });
     top.append(input, out);
     wrap.append(top);
     if (!compact) {
       const ticks = el('div', { class: 'ticks', 'aria-hidden': 'true' });
-      for (let t = 0; t <= 100; t += 20) ticks.append(el('span', {}, `${t}`));
+      for (let t = def.min; t <= def.max; t += def.tickStep) ticks.append(el('span', {}, `${t}`));
       wrap.append(ticks);
     }
-    const words = el('p', { class: 'note' }, infillWords(v));
+    const words = el('p', { class: 'note' }, describe(v));
     wrap.append(words);
     return wrap;
   }

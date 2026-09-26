@@ -119,7 +119,7 @@ Chromebook (Chrome)                            Cloudflare
 | Turn, lay flat, scale (shown in mm) | Edit start/end G-code or the material |
 | Pick layer height (0.18 / 0.25 / 0.38 mm, i.e. Cura LE's High Detail / Standard / High Speed profile) | Type in any setting number |
 | Infill 0-100% in steps of 5, infill pattern from a list of 7, 2-4 walls | Change support infill: tree supports are always 0% (Dalton, 2026-09-25) |
-| Tree supports: none / touching build plate / everywhere. Skirt or brim | Go past the bed size or the teacher's max print time |
+| Tree supports: none / touching build plate / everywhere, support overhang angle 40-80° (default 60°, LulzBot's). Skirt or brim | Go past the bed size or the teacher's max print time |
 | Type their name for the file | Print more copies than the teacher allows |
 
 Server-side checks before any G-code is returned:
