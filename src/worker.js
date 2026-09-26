@@ -14,7 +14,7 @@
 // TEACHER_KEY secret (npx wrangler secret put TEACHER_KEY). No secret set = no teacher access.
 
 import {
-  DEFAULT_CLASS_CONFIG, LIMITS, PRINTER, checkAgainstClass, formatMinutes, safeNamePart, summarize,
+  DEFAULT_CLASS_CONFIG, LIMITS, PRINTER, checkAgainstClass, formatMinutes, gcodeFileName, summarize,
   toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
 
@@ -253,9 +253,7 @@ async function handleSlice(request, env) {
   const stl = checkPlateSTL(stlBytes);
   if (!stl.ok) return refuse(400, stl.message);
 
-  const who = safeNamePart(form.get('name'), '');
-  const what = safeNamePart(form.get('modelName'), 'model');
-  const fileName = `${who ? `${who}-` : ''}${what}`.slice(0, 40).replace(/-$/, '') + '.gcode';
+  const fileName = gcodeFileName(form.get('fileName'), form.get('name'), form.get('modelName'));
 
   // The slicer (container/), if this deployment has one (see slicerSender).
   const send = slicerSender(env);

@@ -3,7 +3,7 @@
 // (STL/OBJ/3MF), shared/settings.js (what may be changed; the Worker checks the same list).
 
 import './style.css';
-import { LIMITS, PRINTER, formatMinutes, safeNamePart, summarize } from '../../shared/settings.js';
+import { LIMITS, PRINTER, formatMinutes, gcodeFileName, summarize } from '../../shared/settings.js';
 import { $, el, esc, fmt } from './dom.js';
 import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.js';
 import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
@@ -471,11 +471,15 @@ function studentName() {
   }
 }
 
+// The student's own name for the file ('' = use "name-model"). Kept until the plate is emptied.
+let customFileName = '';
+
 function fileName() {
-  const model = viewer.models[0]?.name ?? 'model';
-  const who = safeNamePart(studentName(), '');
-  const what = safeNamePart(model, 'model');
-  return `${who ? `${who}-` : ''}${what}`.slice(0, 40).replace(/-$/, '') + '.gcode';
+  return gcodeFileName(customFileName, studentName(), viewer.models[0]?.name ?? 'model');
+}
+
+function defaultFileName() {
+  return gcodeFileName('', studentName(), viewer.models[0]?.name ?? 'model').replace(/\.gcode$/, '');
 }
 
 function renderAction() {
@@ -509,13 +513,31 @@ function renderAction() {
     try {
       localStorage.setItem(STORE_NAME, input.value);
     } catch { /* fine */ }
+    $('#fileNameInput').placeholder = defaultFileName();
     $('#fileNamePreview').textContent = fileName();
   });
   nameRow.append(input);
   card.append(nameRow);
+
+  // The file name on the SD card: filled in for them, theirs to change.
+  const fileRow = el('label', { class: 'name-field file-field' });
+  fileRow.append(el('span', {}, 'File name'));
+  const fileWrap = el('span', { class: 'file-input' });
+  const fileInput = el('input', {
+    type: 'text', id: 'fileNameInput', maxlength: LIMITS.maxFileNameLength + 6, placeholder: defaultFileName(),
+    spellcheck: 'false', autocomplete: 'off', 'aria-describedby': 'fileNamePreview',
+  });
+  fileInput.value = customFileName;
+  fileInput.addEventListener('input', () => {
+    customFileName = fileInput.value;
+    $('#fileNamePreview').textContent = fileName();
+  });
+  fileWrap.append(fileInput, el('span', { class: 'file-ext', 'aria-hidden': 'true' }, '.gcode'));
+  fileRow.append(fileWrap);
+  card.append(fileRow);
   const fn = el('p', { class: 'file-name' });
-  fn.innerHTML = `<span aria-hidden="true">💾</span> <span id="fileNamePreview">${esc(fileName())}</span>`;
-  fn.title = 'The file name on the SD card. Your name also shows on the printer screen while it prints.';
+  fn.innerHTML = `<span aria-hidden="true">💾</span> Saved as <span id="fileNamePreview">${esc(fileName())}</span>`;
+  fn.title = 'Letters, numbers and dashes only. Short names are easiest to find on the printer screen.';
   card.append(fn);
 
   const sum = el('p', { class: 'action-summary' }, summarize(panel.value));
@@ -595,6 +617,7 @@ async function runSlice() {
   form.append('settings', JSON.stringify(panel.value));
   form.append('name', studentName());
   form.append('modelName', viewer.models[0].name);
+  form.append('fileName', customFileName);
   // A random id for this browser, only for the slicer's fair-use limit (a school shares one IP).
   let clientId = '';
   try {
@@ -614,7 +637,7 @@ async function runSlice() {
       const blob = await res.blob();
       const cd = res.headers.get('content-disposition') ?? '';
       const name = /filename="([^"]+)"/.exec(cd)?.[1] ?? fileName();
-      slice = { state: 'done', download: true, url: URL.createObjectURL(blob), fileName: name, stats: decodeURIComponent(res.headers.get('x-print-summary') ?? '') };
+      slice = { state: 'done', download: true, blob, url: URL.createObjectURL(blob), fileName: name, stats: decodeURIComponent(res.headers.get('x-print-summary') ?? '') };
       try {
         const parsed = parseGcode(await blob.text());
         if (parsed.layers.length) showGcode(parsed, { kind: 'slice', name });
@@ -638,9 +661,29 @@ async function runSlice() {
   renderAction();
 }
 
-function downloadResult() {
+// Save the G-code under the name in the File name box (it may have changed since slicing). Chrome
+// (Chromebooks too) shows a real save dialog, so the student picks the SD card and sees the name;
+// other browsers download it.
+async function downloadResult() {
   if (!slice.url) return;
-  const a = el('a', { href: slice.url, download: slice.fileName });
+  const name = fileName();
+  if (window.showSaveFilePicker && slice.blob) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: name,
+        types: [{ description: 'G-code for the printer', accept: { 'text/plain': ['.gcode'] } }],
+      });
+      const out = await handle.createWritable();
+      await out.write(slice.blob);
+      await out.close();
+      toast(`Saved ${handle.name}. Eject the SD card before you pull it out.`, { kind: 'info', timeout: 9000 });
+      return;
+    } catch (err) {
+      if (err?.name === 'AbortError') return; // they pressed Cancel
+      console.warn('save dialog failed; downloading instead', err);
+    }
+  }
+  const a = el('a', { href: slice.url, download: name });
   document.body.append(a);
   a.click();
   a.remove();
@@ -651,6 +694,7 @@ function downloadResult() {
 function plateChanged() {
   invalidateSlice();
   const n = viewer.models.length;
+  if (!n) customFileName = ''; // a new plate gets a new name
   $('#empty').hidden = n > 0;
   panel.setPlateInfo({ overhangs: viewer.models.reduce((a, m) => a + m.overhangArea, 0), hasModels: n > 0 });
   renderObjects();

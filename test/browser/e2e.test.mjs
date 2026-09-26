@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs';
 const base = (process.argv[2] || BASE) + '?debug';
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 }, acceptDownloads: true });
+// Plain download path here (the save-dialog path has its own test, filename.test.mjs).
+await ctx.addInitScript(() => { window.showSaveFilePicker = undefined; });
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
