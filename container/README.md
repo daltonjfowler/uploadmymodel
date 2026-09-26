@@ -5,6 +5,8 @@ the school uses, checked by SHA-256 at build time), Cura's own 4.13.2 resource f
 AppImage, the resolver from `engine/`, and a small HTTP service (`server.py`). Image: about 200 MB.
 
 **Status (2026-09-26): works locally, not deployed.** The live site still answers 501 for Slice.
+The go-live wiring (Cloudflare Container binding, fair-use limits, teacher warm-up button) is ready
+on the **`slicer-live`** branch; its `docs/GO_LIVE.md` has the checklist and the undo steps.
 Deploying it as a Cloudflare Container costs container time from the allowance shared with
 uploadmycode and uploadmylaser, so that is Dalton's call (see "Before going live").
 

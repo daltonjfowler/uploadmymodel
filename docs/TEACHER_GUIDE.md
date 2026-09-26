@@ -9,7 +9,8 @@ What works today (2026-09-26) and how to run it. Student steps are in
   teacher page.
 - **Not live yet: slicing.** Slice checks everything and then says the engine is not connected.
   The slicer works on the development PC (`container/README.md`). Putting it online needs a
-  decision on Cloudflare container cost.
+  decision on Cloudflare container cost; the switch is ready on the `slicer-live` branch
+  (`docs/GO_LIVE.md` there).
 
 ## The teacher page
 
