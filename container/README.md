@@ -57,9 +57,19 @@ now and then, see `docs/ENGINE_OPTIONS.md`).
 
 ## Before going live
 
-- Container size and cost: tree supports use one core; a Benchy took 12 s here (12-core desktop).
-  Cloudflare's `basic` instance has a quarter vCPU, so expect roughly a minute for a supported
-  Benchy. Measure on the real instance first.
+- Container size and cost. Measured on this PC with Docker CPU limits (an estimate of Cloudflare's
+  instances, not a measurement there):
+
+  | Docker limit | Sample piece | Benchy, tree supports | Benchy, no supports |
+  |---|---|---|---|
+  | 1/4 CPU, 1 GiB (like `basic`) | 5.7 s | 81 s | 18 s |
+  | 1/2 CPU | 2.6 s | 33 s | 7.5 s |
+  | no limit (12-core desktop) | 0.8 s | 12 s | about 2 s |
+
+  Memory stayed far under 1 GiB. Tree supports are most of the time. With `basic`, a class of
+  students slicing supported models one at a time would queue (one slice at a time per
+  container); allowing 2-3 instances, or a bigger instance, trades cost for waiting. The page
+  shows a progress bar the whole time; a minute-long wait may need a friendlier message.
 - Decide the 0% vs 15% tree support infill (above).
 - Teacher limits (longest print time) and whether to write the student's name into the file.
 - Wire it as a Cloudflare Container binding (like uploadmylaser's `LaserContainer`) instead of
