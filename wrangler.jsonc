@@ -19,7 +19,7 @@
   // The slicer: CuraEngine 4.13.2 in a container (container/README.md). 1 vCPU / 3 GiB is the
   // smallest custom size (Cloudflare needs 3 GiB per vCPU): a supported Benchy in about 16 s, five
   // times faster than basic (79 s). CPU bills only while slicing; memory while awake. Sleeps
-  // after 5 min without work, and only the teacher's open slicing window lets work in.
+  // after 2 min without work, and only the teacher's open slicing window lets work in.
   "containers": [
     {
       "class_name": "SlicerContainer",

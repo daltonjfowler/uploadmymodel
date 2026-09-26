@@ -10,7 +10,7 @@ On top of `main` (which already has the class gate, the fair-use limits and the 
 all inactive without a slicer), only the container itself:
 
 - `src/index.js`: the Worker entry, with `SlicerContainer` (CuraEngine 4.13.2 from
-  `container/Dockerfile`, sleeps after 5 minutes without work).
+  `container/Dockerfile`, sleeps after 2 minutes without work).
 - `wrangler.jsonc`: the container at **1 vCPU / 3 GiB** (the smallest custom size), at most 2
   running, its Durable Object binding and migration, and two rate limits (6 slices a minute per
   browser, 60 a minute for everyone).
@@ -21,7 +21,7 @@ all inactive without a slicer), only the container itself:
   included in the Workers plan). Memory ($0.0000025 per GiB-second) and disk are billed while the
   container is awake. The 25 GiB-hours of included memory are shared with uploadmycode and
   uploadmylaser and are usually used up already, so assume memory is paid.
-- It is only awake when someone slices during an open window, plus 5 minutes. Opening slicing
+- It is only awake when someone slices during an open window, plus 2 minutes. Opening slicing
   wakes it once (a few seconds of work, then it sleeps again if nobody slices).
 - One busy class period (awake 55 minutes, 90 slices of Benchy size): memory 3 GiB × 3,300 s ≈
   $0.025, CPU 90 × 16 s ≈ $0.03 (free while the included minutes last), disk ≈ $0.001. **About

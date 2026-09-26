@@ -6,8 +6,9 @@ import worker from './worker.js';
 
 export class SlicerContainer extends Container {
   defaultPort = 8080;
-  // Same as uploadmycode and uploadmylaser: memory bills while awake; a cold start is a few seconds.
-  sleepAfter = '5m';
+  // Shorter than uploadmycode/uploadmylaser (5m): slicing happens in bursts during class, memory
+  // bills while awake, and a cold start is only a few seconds (the container pre-warms itself).
+  sleepAfter = '2m';
 }
 
 export default {
