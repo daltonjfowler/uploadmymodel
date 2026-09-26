@@ -13,9 +13,10 @@ What works today (2026-09-26) and how to run it. Student steps are in
 
 **uploadmymodel.com/teacher/** (also the **Teacher** link at the top of the student page).
 
-1. **Teacher key.** It is saved in `uploadmymodel-TEACHER-KEY.txt` on the development PC's
-   desktop. Tick **Remember on this computer** on your own machine only. To change the key, run
-   `npx wrangler secret put TEACHER_KEY` in the project folder.
+1. **Teacher key.** One shared password for uploadmycode, uploadmylaser and uploadmymodel, saved in
+   `TEACHER-PASSWORD.txt` on the development PC's desktop. Tick **Remember on this computer** on
+   your own machine only. To change it, run `npx wrangler secret put TEACHER_KEY` in each of the
+   three project folders.
 2. **Class settings.** For each setting:
    - **Students can change**: on, or off to lock it. A locked setting shows greyed out with a 🔒,
      and the server refuses a file that changes it.
