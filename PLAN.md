@@ -217,12 +217,16 @@ class phrase, limits, warm-up.
 - Do students need supports at all in version 1, or is "lay it flat" enough to start?
 - One class setting or several? (Suggest two to start: Normal and Strong.)
 - Is the Workhorse the only printer, or will other LulzBots need profiles later?
-- Does school's engine (4.13.2) have Lightning infill? Home Cura 4.13.17 does. If not, remove it
-  from `shared/settings.js` (the Worker then refuses it too).
+- ~~Does school's engine (4.13.2) have Lightning infill?~~ Yes, its fdmprinter.def.json lists it
+  (docs/ENGINE_OPTIONS.md). Still worth one test print.
 - Student-picked layer height = the whole Cura quality profile (speeds and first layer come with
   it). Is that right, or should layer height change alone on top of High Detail?
 - Edge margin: the page keeps models 5 mm from the bed edge. Check against Cura LE's disallowed
   areas for the Workhorse.
-- Worth a look before building the container: CuraEngine compiled to WebAssembly would slice on
-  the Chromebook itself with no container cost. Not checked: whether a 4.13 build exists, and speed
-  on a slow Chromebook.
+- ~~CuraEngine in WebAssembly?~~ Checked 2026-09-26: no maintained 4.13 build (cura-wasm is
+  archived, about 4.8). Parked. See docs/ENGINE_OPTIONS.md.
+- Engine spike 2026-09-26 (engine/, docs/ENGINE_OPTIONS.md): CuraEngine + a small resolver + the
+  4.13.2 resource files reproduce the school Benchy: start/end G-code byte for byte (except the
+  filament weight line), same temps, walls, skin, infill; tree supports ~5% heavier. Next: a Linux
+  container with the engine from the 4.13.2 AppImage, retry on crash. Needs: school's exact Cura LE
+  version (Help → About), and ideally one `--external-backend` capture from the school PC.

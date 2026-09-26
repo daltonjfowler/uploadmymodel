@@ -67,8 +67,8 @@ export const INFILL_PATTERNS = [
   { id: 'trihexagon', label: 'Tri-hexagon', blurb: 'Triangles and hexagons. Strong in every flat direction.' },
   { id: 'cubic', label: 'Cubic', blurb: 'Little tilted cubes stacked up. Strong in every direction.' },
   { id: 'gyroid', label: 'Gyroid', blurb: 'Wavy, like a sponge. Strong every way. Looks cool in the preview.' },
-  // Lightning is in Cura LE 4.13.17's list. Whether school's engine 4.13.2 has it is not checked yet
-  // (PLAN.md §7). If it does not, drop it here and the Worker will reject it too.
+  // Lightning is in the 4.13.2 fdmprinter.def.json too (checked 2026-09-26, docs/ENGINE_OPTIONS.md).
+  // Not yet test-printed.
   { id: 'lightning', label: 'Lightning', blurb: 'Tree-like, only holds up the top. Fastest and lightest, but weak.' },
 ];
 

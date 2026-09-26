@@ -29,6 +29,9 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   `TEACHER_KEY` is a Worker secret; for local dev put a throwaway one in `.dev.vars`.
 - `scripts/make-icons.mjs`: draws the icon. Edit the icon there, never `web/public/icon.svg` by hand.
 - `docs/HARDWARE.md`: printer and slicer facts, each with its source.
+- `docs/ENGINE_OPTIONS.md` + `engine/`: the CuraEngine spike. `engine/resolve.py` does Cura's
+  setting formulas from the school version's files (`engine/res4132/`, never edit them);
+  `engine/run.py` slices with CuraEngine. Not wired into the Worker yet.
 - `profiles/current_lulzbot_9_18.json`: the class profile, decoded from the school G-code footer.
 - `test/golden/*.gcode`: real G-code sliced by school Cura. Stored byte for byte (`-text`).
 - `test/*.test.mjs`: settings and server checks (`npm test`).
