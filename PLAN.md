@@ -16,6 +16,12 @@ and no student accounts.
 | sent over Web Serial | sent over Web Serial | **downloaded**, copied to SD card by hand |
 | Uno board fixed on the server | power/speed presets on the server | print profiles frozen on the server |
 
+**Update 2026-09-26:** the slicer works locally: `container/` runs school's exact CuraEngine
+(4.13.2, from the official AppImage) with a resolver, and the site slices through it end to end in
+local dev (real G-code, Preview, Save). Not deployed yet. Also built: teacher page, Preview tab,
+undo, multi-select, rotate rings. Open decision: tree supports at 0% infill print about half the
+support plastic of school's 15% (container/README.md).
+
 **Status (2026-09-25 evening):** the student page is live at https://uploadmymodel.com as a
 framework: open STL/OBJ/3MF, the Workhorse bed in 3D, move / scale / rotate / lay flat / mirror,
 red overhang shading, Cura-style Recommended and Custom settings, and a Slice button whose request

@@ -170,9 +170,12 @@ Differences in those files that explain the gaps [ran]:
   byte for byte on Linux, convert to CRLF. The printer does not care.
 - Cura adds a `;SETTING_3` footer. We do not need it, but we can copy one in if we want the
   file to reopen in Cura with the profile.
-- Side finding: `support_infill_rate` 0 and 15 gave identical G-code with tree supports. Tree
-  support in 4.13 ignores it. So "tree supports are always 0%" costs nothing. School's quality file
-  says 15 anyway.
+- ~~Side finding: `support_infill_rate` 0 and 15 gave identical G-code with tree supports.~~
+  **Correction, 2026-09-26 [ran]:** that was true for the home 4.13.17 engine only. School's
+  4.13.2 engine (from the AppImage, in the container) does use it: at 0% the tree branches are
+  hollow shells, about half the support path of school's 15% (Benchy: 37.9 m against 69.6 m), and
+  the whole print is 2.32 m / 17.3 g instead of 2.76 m / 20.6 g. So "tree supports are always 0%"
+  is a real change from how school prints today. See container/README.md.
 - Side finding for PLAN.md §7: the 4.13.2 `fdmprinter.def.json` has Lightning infill. [ran]
 
 ### Speed and memory [ran]
@@ -306,6 +309,13 @@ a supported model, with the tab busy. Fine for small parts, painful for big ones
 would also happen in the browser.
 
 ---
+
+## 5b. Done since: the container [ran]
+
+`container/` builds CuraEngine 4.13.2 from the official AppImage (SHA-256 checked), the AppImage's
+own resource files and the resolver into a 200 MB image. With 15% support infill the Benchy comes
+out +1.7% time / +2.7% filament against school, with walls, skin and infill the same length. It is
+wired into the Worker for local dev (`SLICER_URL`), not deployed. Details: container/README.md.
 
 ## 5. Recommendation
 

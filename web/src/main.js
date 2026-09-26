@@ -568,7 +568,7 @@ async function runSlice() {
       const blob = await res.blob();
       const cd = res.headers.get('content-disposition') ?? '';
       const name = /filename="([^"]+)"/.exec(cd)?.[1] ?? fileName();
-      slice = { state: 'done', download: true, url: URL.createObjectURL(blob), fileName: name, stats: res.headers.get('x-print-summary') };
+      slice = { state: 'done', download: true, url: URL.createObjectURL(blob), fileName: name, stats: decodeURIComponent(res.headers.get('x-print-summary') ?? '') };
       try {
         const parsed = parseGcode(await blob.text());
         if (parsed.layers.length) showGcode(parsed, { kind: 'slice', name });

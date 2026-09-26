@@ -7,7 +7,7 @@ started on as the context (Uranium's PropertyEvaluationContext.rootStack()).
 Single extruder only. Writes flat JSON files of resolved values for CuraEngine.
 Usage: python resolve.py <quality: high_detail|standard|high_speed> <out_prefix> [key=value ...global] [--e key=value ...extruder]
 """
-import ast, configparser, json, math, os, sys, xml.etree.ElementTree as ET
+import ast, builtins, configparser, json, math, os, sys, xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # CURA_RESOURCES: an installed Cura LE resources folder, for any file not in the overlay.
@@ -226,7 +226,9 @@ class Stack:
             f = FORMULAS[src] = Formula(src)
         g = dict(FUNCS)
         for n in f.names:
-            if n in g or n in dir(__builtins__):
+            # builtins module, not __builtins__: that is a dict when this file is imported, and
+            # dir() of a dict would let settings shadow min(), max(), round()...
+            if n in g or hasattr(builtins, n):
                 continue
             g[n] = root.value(n)
         try:

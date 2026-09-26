@@ -1,0 +1,7 @@
+# The slicer image only needs the engine scripts and the server (container/Dockerfile).
+*
+!engine/resolve.py
+!engine/run.py
+!engine/test_resolve.py
+!engine/reference/
+!container/server.py

@@ -212,16 +212,20 @@ async function handleSlice(request, env) {
   const model = form.get('model');
   if (!model || typeof model === 'string') return refuse(400, 'No model was sent.');
   if (model.size > LIMITS.maxUploadBytes) return refuse(413, `That plate is too big (the most is ${LIMITS.maxUploadBytes / 1048576} MB).`);
-  const stl = checkPlateSTL(await model.arrayBuffer());
+  const stlBytes = await model.arrayBuffer();
+  const stl = checkPlateSTL(stlBytes);
   if (!stl.ok) return refuse(400, stl.message);
 
   const who = safeNamePart(form.get('name'), '');
   const what = safeNamePart(form.get('modelName'), 'model');
   const fileName = `${who ? `${who}-` : ''}${what}`.slice(0, 40).replace(/-$/, '') + '.gcode';
 
-  // Phase 1: hand stl + toCuraOverrides(settings) + the frozen class profile to the slicing
-  // container, check the estimates against the teacher's limits, stamp the header comment and
-  // M117 name, and stream the G-code back as an attachment named fileName.
+  // The slicer (container/): only when SLICER_URL is set, which for now is local dev only
+  // (.dev.vars, with the container running in Docker). Still to decide before it goes live:
+  // Cloudflare Container sizing and cost, teacher limits on print time, and a header comment /
+  // M117 with the student's name.
+  if (env.SLICER_URL) return sliceWithEngine(env.SLICER_URL, stlBytes, checked.settings, fileName);
+
   return json(501, {
     error: 'engine_not_ready',
     message: 'Your settings and model passed every check. The slicing engine is not connected yet.',
@@ -230,6 +234,44 @@ async function handleSlice(request, env) {
     settings: checked.settings,
     cura: toCuraOverrides(checked.settings),
     model: { triangles: stl.triangles, sizeMm: stl.size },
+  });
+}
+
+function formatMinutes(seconds) {
+  const m = Math.round(seconds / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+async function sliceWithEngine(base, stlBytes, settings, fileName) {
+  let res;
+  try {
+    res = await fetch(new URL('/slice', base), {
+      method: 'POST',
+      body: stlBytes,
+      headers: { 'content-type': 'model/stl', 'x-cura-settings': JSON.stringify(toCuraOverrides(settings)) },
+    });
+  } catch {
+    return refuse(503, 'The slicer is not answering. Try again in a minute.');
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    console.error(JSON.stringify({ message: 'slicer refused', status: res.status, detail: detail.slice(0, 300) }));
+    return refuse(502, 'The slicer could not slice this model. Check it in the 3D view, or ask your teacher.');
+  }
+  const time = Number(res.headers.get('x-print-time-s'));
+  const grams = Number(res.headers.get('x-filament-g'));
+  const layers = res.headers.get('x-layers');
+  const summary = [time ? formatMinutes(time) : null, grams ? `${Math.round(grams)} g of plastic` : null, layers ? `${layers} layers` : null]
+    .filter(Boolean).join(' · ');
+  return new Response(res.body, {
+    status: 200,
+    headers: {
+      'content-type': 'text/plain; charset=utf-8',
+      'content-disposition': `attachment; filename="${fileName}"`,
+      'cache-control': 'no-store',
+      // Headers are Latin-1 only; "·" and friends go URL-encoded (the page decodes them).
+      'x-print-summary': encodeURIComponent(summary),
+    },
   });
 }
 

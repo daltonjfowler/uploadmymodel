@@ -31,7 +31,10 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
 - `docs/HARDWARE.md`: printer and slicer facts, each with its source.
 - `docs/ENGINE_OPTIONS.md` + `engine/`: the CuraEngine spike. `engine/resolve.py` does Cura's
   setting formulas from the school version's files (`engine/res4132/`, never edit them);
-  `engine/run.py` slices with CuraEngine. Not wired into the Worker yet.
+  `engine/run.py` slices with CuraEngine. `engine/test_resolve.py` checks against the reference.
+- `container/`: the slicer service (CuraEngine 4.13.2 from the official AppImage + resolver +
+  `server.py`). Local only: the Worker uses it when `SLICER_URL` is set (`.dev.vars`), else 501.
+  Not deployed to Cloudflare (container cost is Dalton's call). See container/README.md.
 - `profiles/current_lulzbot_9_18.json`: the class profile, decoded from the school G-code footer.
 - `test/golden/*.gcode`: real G-code sliced by school Cura. Stored byte for byte (`-text`).
 - `test/*.test.mjs`: settings and server checks (`npm test`).
