@@ -2,7 +2,7 @@
 // the side), wearing the upload arrow on top. Drawn by hand as three faces rather than projected,
 // so it matches the other three. The look (ink outline, hand-drawn wobble) lives in
 // scripts/icon-kit.mjs, shared by all four sites. Usage: node scripts/make-icons.mjs web/public
-import { circle, curve, inked, poly, tile, writeIcons } from './icon-kit.mjs';
+import { circle, curve, inked, poly, tag, tile, writeIcons } from './icon-kit.mjs';
 
 const OUT = process.argv[2] || '.';
 // Family colours: grey face, deep tile of the site's colour, arrow in a brighter tint of it.
@@ -19,14 +19,22 @@ const arrow = (dx, dy) => [[29 + dx, 25 + dy], [34 + dx, 25.4 + dy], [34 + dx, 1
 
 writeIcons(OUT, [
   tile(BG),
-  ellipse(32, 56.5, 23, 4.2, FLOOR), // shadow on the floor
-  ...inked([poly(front, FACE), poly(side, SIDE), poly(top, TOP)], INK),
-  // print layer lines on the side
-  ...[0, 1, 2, 3, 4].map((k) => curve(40, 34 + k * 4.6, 45, 31.6 + k * 4.6, 50.2, 29 + k * 4.6, 0.7, LAYER)),
-  // face on the front
-  circle(21.5, 37.5, 2.4, DARK), circle(31.5, 38.5, 2.4, DARK),
-  circle(22.3, 36.7, 0.8, WHITE), circle(32.3, 37.7, 0.8, WHITE),
-  curve(20.5, 45, 26.5, 50, 32.5, 46.5, 2.4, DARK),
+  ...tag('shadow', [ellipse(32, 56.5, 23, 4.2, FLOOR)]), // shadow on the floor
+  ...tag('cube', [
+    ...inked([poly(front, FACE), poly(side, SIDE), poly(top, TOP)], INK),
+    // print layer lines on the side
+    ...[0, 1, 2, 3, 4].map((k) => curve(40, 34 + k * 4.6, 45, 31.6 + k * 4.6, 50.2, 29 + k * 4.6, 0.7, LAYER)),
+    // face on the front
+    circle(21.5, 37.5, 2.4, DARK), circle(31.5, 38.5, 2.4, DARK),
+    circle(22.3, 36.7, 0.8, WHITE), circle(32.3, 37.7, 0.8, WHITE),
+    curve(20.5, 45, 26.5, 50, 32.5, 46.5, 2.4, DARK),
+  ]),
   // the arrow
-  ...inked([poly(arrow(1.4, 0.6), ARROW_SHADE), poly(arrow(0, 0), ARROW)], INK),
-], 'uploadmymodel icon: the family robot as a 3D-printed cube head with the upload arrow.');
+  ...tag('pop', inked([poly(arrow(1.4, 0.6), ARROW_SHADE), poly(arrow(0, 0), ARROW)], INK)),
+], 'uploadmymodel icon: the family robot as a 3D-printed cube head with the upload arrow.', `
+  .cube { transform-box: view-box; transform-origin: 32px 56px; animation: squash 1s ease-in-out infinite; }
+  @keyframes squash { 0%, 100% { transform: scale(1, 1); } 35% { transform: scale(1.05, 0.93); } 60% { transform: scale(0.98, 1.03); } }
+  .pop { animation: pop 1s ease-in-out infinite; }
+  @keyframes pop { 0%, 100% { transform: translateY(0); } 35% { transform: translateY(2px); } 60% { transform: translateY(-5px); } }
+  .shadow { animation: shadow 1s ease-in-out infinite; }
+  @keyframes shadow { 0%, 100% { transform: scaleX(1); } 35% { transform: scaleX(1.06); } }`);
