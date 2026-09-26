@@ -5,7 +5,11 @@ For the classroom LulzBot printers. Takes about 5 minutes once your model is rea
 ## 1. Get your model
 
 - **Tinkercad:** Export → **.STL**.
-- Onshape, Fusion, Thingiverse: download an **STL**, **OBJ** or **3MF** file.
+- **Onshape:** right-click the part (or the Part Studio tab) → Export → Format **STL**.
+- **Fusion 360:** File → Export → type **STL**. (Or right-click the body → Save As Mesh.)
+- **Blender:** File → Export → **STL**. If it opens tiny on the bed, export again with **Scale**
+  set to **1000** (Blender works in meters).
+- Thingiverse: download the **STL**, **OBJ** or **3MF** file.
 
 ## 2. Open it
 
