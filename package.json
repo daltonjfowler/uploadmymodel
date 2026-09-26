@@ -22,6 +22,7 @@
     "workerd@1.20260828.1": true
   },
   "dependencies": {
-    "three": "0.186.1"
+    "three": "0.186.1",
+    "three-mesh-bvh": "0.9.15"
   }
 }

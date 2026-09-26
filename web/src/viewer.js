@@ -9,6 +9,17 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
+
+// Picking a 500k-triangle model by testing every triangle takes ~0.25 s on a slow Chromebook, too
+// slow for hover and drag. three-mesh-bvh (MIT) builds a search tree per model instead. Building
+// one takes a moment, so it is built when the browser is idle after the shape changes
+// (scheduleTrees), and only for models up to TREE_MAX_TRIANGLES; without one, hover uses the
+// model's box and a click does a plain (slower) raycast. The library's worker builder is not used: it borrows the position array
+// while building, and this app reads that array (paint, turns) at any time.
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const MODEL_COLOR = new THREE.Color('#fb923c');
 const OVERHANG_COLOR = new THREE.Color('#e5484d');
@@ -42,7 +53,8 @@ export class Model {
     this.geometry = new THREE.BufferGeometry();
     this.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     this.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(positions.length), 3));
-    this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.04 });
+    // flatShading: the GPU works out each face's normal, so no normals array is stored or rebuilt.
+    this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.04, flatShading: true });
     this.mesh = new THREE.Mesh(this.geometry, this.material);
     this.mesh.userData.model = this;
     this.baseSize = new THREE.Vector3(); // size before scale, mm
@@ -78,26 +90,47 @@ export class Model {
   }
 }
 
-// Centre X/Y on 0, put the lowest point at Z = 0, recompute normals and bounds.
+// Centre X/Y on 0, put the lowest point at Z = 0, and reset the bounds. Plain loops over the
+// typed array: three's helpers make a Vector3 per corner, which is slow on big models.
 function normalize(model) {
   const g = model.geometry;
-  g.computeBoundingBox();
-  const b = g.boundingBox;
-  g.translate(-(b.min.x + b.max.x) / 2, -(b.min.y + b.max.y) / 2, -b.min.z);
-  g.computeBoundingBox();
-  g.boundingBox.getSize(model.baseSize);
-  g.computeVertexNormals();
-  g.computeBoundingSphere();
+  const p = g.attributes.position.array;
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+  for (let i = 0; i < p.length; i += 3) {
+    const x = p[i], y = p[i + 1], z = p[i + 2];
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+    if (z < z0) z0 = z;
+    if (z > z1) z1 = z;
+  }
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  for (let i = 0; i < p.length; i += 3) {
+    p[i] -= cx;
+    p[i + 1] -= cy;
+    p[i + 2] -= z0;
+  }
+  const sx = x1 - x0, sy = y1 - y0, sz = z1 - z0;
+  model.baseSize.set(sx, sy, sz);
+  g.boundingBox = new THREE.Box3(new THREE.Vector3(-sx / 2, -sy / 2, 0), new THREE.Vector3(sx / 2, sy / 2, sz));
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, sz / 2), Math.hypot(sx, sy, sz) / 2);
   g.attributes.position.needsUpdate = true;
+  if (g.boundsTree) g.disposeBoundsTree(); // the shape moved; rebuilt on the next pick
 }
 
 // Apply a matrix to the model's own geometry. A mirror turns triangles inside out, so swap two
 // corners of each one to keep the outside facing out.
 function bake(model, matrix) {
-  const g = model.geometry;
-  g.applyMatrix4(matrix);
+  const p = model.geometry.attributes.position.array;
+  const e = matrix.elements;
+  for (let i = 0; i < p.length; i += 3) {
+    const x = p[i], y = p[i + 1], z = p[i + 2];
+    p[i] = e[0] * x + e[4] * y + e[8] * z + e[12];
+    p[i + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+    p[i + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+  }
   if (matrix.determinant() < 0) {
-    const p = g.attributes.position.array;
     for (let i = 0; i < p.length; i += 9) {
       for (let k = 0; k < 3; k++) {
         const t = p[i + 3 + k];
@@ -108,6 +141,12 @@ function bake(model, matrix) {
   }
   normalize(model);
 }
+
+const idle = window.requestIdleCallback ?? ((fn) => setTimeout(fn, 200));
+// Above this, building the tree freezes a slow Chromebook for over a second, which costs more than
+// it saves: such models use box hover and a plain raycast on click (~0.1-0.4 s) instead.
+const TREE_MAX_TRIANGLES = 200_000;
+const wantsTree = (m) => !m.geometry.boundsTree && m.triangles <= TREE_MAX_TRIANGLES;
 
 export class Viewer extends EventTarget {
   constructor(host, printer) {
@@ -457,8 +496,25 @@ export class Viewer extends EventTarget {
     for (const m of this.models) this.checkFit(m);
     this.updateSelectionBox();
     this.updateRings();
+    this.scheduleTrees();
     this.requestRender();
     this.emit('change');
+  }
+
+  // Build missing search trees one model at a time, in idle moments.
+  scheduleTrees() {
+    if (this.treeQueued) return;
+    this.treeQueued = true;
+    idle(() => {
+      this.treeQueued = false;
+      const m = this.models.find(wantsTree);
+      if (!m || this.drag || this.ringDrag) {
+        if (m) this.scheduleTrees();
+        return;
+      }
+      m.geometry.computeBoundsTree();
+      this.scheduleTrees();
+    }, { timeout: 2000 });
   }
 
   // ---- Undo / redo ----------------------------------------------------------------------------
@@ -876,28 +932,30 @@ export class Viewer extends EventTarget {
    */
   layFlatAuto(model) {
     const p = model.geometry.attributes.position.array;
-    const buckets = new Map();
-    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+    // Directions rounded to 1/40 on each axis, packed into one number per bucket.
+    const index = new Map();
+    const area = [], nx = [], ny = [], nz = [];
     for (let i = 0; i < p.length; i += 9) {
-      a.set(p[i], p[i + 1], p[i + 2]);
-      b.set(p[i + 3] - a.x, p[i + 4] - a.y, p[i + 5] - a.z);
-      c.set(p[i + 6] - a.x, p[i + 7] - a.y, p[i + 8] - a.z);
-      const n = b.cross(c);
-      const area = n.length() / 2;
-      if (area < 1e-9) continue;
-      n.normalize();
-      const key = `${Math.round(n.x * 40)},${Math.round(n.y * 40)},${Math.round(n.z * 40)}`;
-      const e = buckets.get(key);
-      if (e) {
-        e.area += area;
-        e.n.addScaledVector(n, area);
-      } else {
-        buckets.set(key, { area, n: n.clone().multiplyScalar(area) });
+      const ux = p[i + 3] - p[i], uy = p[i + 4] - p[i + 1], uz = p[i + 5] - p[i + 2];
+      const vx = p[i + 6] - p[i], vy = p[i + 7] - p[i + 1], vz = p[i + 8] - p[i + 2];
+      const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+      const len = Math.hypot(cx, cy, cz);
+      if (len < 2e-9) continue;
+      const key = (Math.round((cx / len) * 40) + 64) * 16384 + (Math.round((cy / len) * 40) + 64) * 128 + (Math.round((cz / len) * 40) + 64);
+      let k = index.get(key);
+      if (k === undefined) {
+        k = area.length;
+        index.set(key, k);
+        area.push(0); nx.push(0); ny.push(0); nz.push(0);
       }
+      area[k] += len / 2;
+      nx[k] += cx / 2; // cross/2 = unit normal * triangle area
+      ny[k] += cy / 2;
+      nz[k] += cz / 2;
     }
-    let best = null;
-    for (const e of buckets.values()) if (!best || e.area > best.area) best = e;
-    if (best) this.pointDown(model, best.n);
+    let best = -1;
+    for (let k = 0; k < area.length; k++) if (best < 0 || area[k] > area[best]) best = k;
+    if (best >= 0) this.pointDown(model, new THREE.Vector3(nx[best], ny[best], nz[best]));
   }
 
   get supportAngle() {
@@ -961,9 +1019,25 @@ export class Viewer extends EventTarget {
     this.raycaster.setFromCamera(ndc, this.camera);
   }
 
-  pick(e) {
+  /**
+   * What is under the pointer. `hover`: only for the cursor, so a model still waiting for its
+   * search tree counts as hit if the pointer is over its box (never slow).
+   */
+  pick(e, { hover = false } = {}) {
     this.setRay(e);
-    const hit = this.raycaster.intersectObjects(this.models.map((m) => m.mesh), false)[0];
+    const box = new THREE.Box3();
+    const candidates = this.models.filter((m) => {
+      box.copy(m.geometry.boundingBox).applyMatrix4(m.mesh.matrixWorld);
+      return this.raycaster.ray.intersectsBox(box);
+    });
+    if (hover) {
+      // Box answer for models without a tree, a real test for the rest (fast either way).
+      const boxOnly = candidates.find((m) => !m.geometry.boundsTree);
+      if (boxOnly) return { model: boxOnly };
+    }
+    this.raycaster.firstHitOnly = true;
+    const hit = this.raycaster.intersectObjects(candidates.map((m) => m.mesh), false)
+      .sort((a, b) => a.distance - b.distance)[0];
     return hit ? { model: hit.object.userData.model, point: hit.point, face: hit.face } : null;
   }
 
@@ -1055,7 +1129,7 @@ export class Viewer extends EventTarget {
     if (now - (this.lastHover ?? 0) < 80) return;
     this.lastHover = now;
     const ring = this.hitRing(e);
-    this.canvas.style.cursor = ring ? 'alias' : this.pick(e) ? 'grab' : '';
+    this.canvas.style.cursor = ring ? 'alias' : this.pick(e, { hover: true }) ? 'grab' : '';
   }
 
   onPointerUp(e) {
