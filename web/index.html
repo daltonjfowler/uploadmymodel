@@ -97,6 +97,7 @@
 
     <div id="hint" class="hint" hidden role="tooltip"></div>
     <div id="toasts" class="toasts" aria-live="polite"></div>
+    <div id="ctxMenu" class="ctx-menu card" role="menu" aria-label="Model actions" hidden></div>
     <div id="drop" class="drop-overlay" hidden><div>Drop to put it on the printer bed</div></div>
     <div id="busy" class="busy" hidden><div class="spinner" aria-hidden="true"></div><span id="busyText">Loading…</span></div>
   </main>
@@ -131,6 +132,7 @@
         <tr><td>Turn by dragging</td><td>Rotate tool, then drag a coloured ring (snaps to 15°)</td></tr>
         <tr><td>Tools</td><td><kbd>T</kbd> move · <kbd>S</kbd> scale · <kbd>R</kbd> rotate · <kbd>M</kbd> mirror</td></tr>
         <tr><td>Nudge a model</td><td>Arrow keys (1 mm), Shift + arrows (10 mm)</td></tr>
+        <tr><td>More actions</td><td>Right-click a model (on a touch screen, press and hold): split into separate objects, copy, lay flat, delete</td></tr>
         <tr><td>Copy / delete</td><td><kbd>Ctrl</kbd>+<kbd>D</kbd> · <kbd>Delete</kbd></td></tr>
         <tr><td>Undo / redo</td><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> · <kbd>Ctrl</kbd>+<kbd>Y</kbd></td></tr>
         <tr><td>Preview layers</td><td>Open a <code>.gcode</code> file, then ↑ ↓ to step through layers</td></tr>

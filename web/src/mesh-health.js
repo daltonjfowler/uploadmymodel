@@ -6,14 +6,15 @@
 // Corners are matched by their exact float bits (files share corners exactly; -0 counts as 0),
 // with a typed-array hash table: a Map of strings would be far too slow for big models.
 
-/** @returns {{ triangles: number, openEdges: number, badEdges: number }} */
-export function meshHealth(positions) {
+/**
+ * Weld corners: one id per distinct position. Also used by split.js.
+ * @returns {{ id: Int32Array, unique: number }} id per corner, and how many distinct positions
+ */
+export function weld(positions) {
   const n = positions.length / 3;
   const f = new Float32Array(n * 3);
   for (let i = 0; i < f.length; i++) f[i] = positions[i] + 0; // + 0 turns -0 into 0
   const bits = new Uint32Array(f.buffer);
-
-  // Weld corners: id per distinct position.
   let cap = 1;
   while (cap < n * 2) cap <<= 1;
   const slot = new Int32Array(cap).fill(-1); // -> index of the first corner with that position
@@ -22,7 +23,14 @@ export function meshHealth(positions) {
   const uniqueOf = new Int32Array(n); // corner index -> weld id, for the first corner of each id
   for (let i = 0; i < n; i++) {
     const x = bits[i * 3], y = bits[i * 3 + 1], z = bits[i * 3 + 2];
-    let h = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791)) & (cap - 1);
+    // Whole-number corners (common from Tinkercad) have float bits ending in zeros, so the bits
+    // are mixed before the low ones pick a slot (murmur3's finisher); otherwise they all collide.
+    let h = Math.imul(x, 73856093) ^ Math.imul(y ^ (y >>> 15), 19349663) ^ Math.imul(z ^ (z >>> 13), 83492791);
+    h ^= h >>> 16;
+    h = Math.imul(h, 0x85ebca6b);
+    h ^= h >>> 13;
+    h = Math.imul(h, 0xc2b2ae35);
+    h = (h ^ (h >>> 16)) & (cap - 1);
     for (;;) {
       const s = slot[h];
       if (s < 0) {
@@ -38,6 +46,13 @@ export function meshHealth(positions) {
       h = (h + 1) & (cap - 1);
     }
   }
+  return { id, unique };
+}
+
+/** @returns {{ triangles: number, openEdges: number, badEdges: number }} */
+export function meshHealth(positions) {
+  const n = positions.length / 3;
+  const { id, unique } = weld(positions);
 
   // Count how many triangles use each edge.
   const uses = new Map();

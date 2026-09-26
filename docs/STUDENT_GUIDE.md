@@ -28,6 +28,8 @@ Go to **uploadmymodel.com** and drop the file on the printer bed (or press **Ope
   should touch the bed. Or **Biggest flat side down**.
 - **Red means it hangs in the air.** Click **Below** (bottom left) to see underneath. Red parts need
   supports, or turn the model so less is red.
+- **Several things in one file?** (Like a set of keychains.) Right-click it → **Split into separate
+  objects**. Then you can move and turn each one on its own. Parts that touch stay together.
 - Made a mistake? **Ctrl + Z** undoes it.
 
 ## 4. Pick your settings

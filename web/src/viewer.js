@@ -207,6 +207,7 @@ export class Viewer extends EventTarget {
     this.canvas.addEventListener('pointermove', (e) => this.onPointerMove(e));
     this.canvas.addEventListener('pointerup', (e) => this.onPointerUp(e));
     this.canvas.addEventListener('pointercancel', (e) => this.onPointerUp(e));
+    this.canvas.addEventListener('contextmenu', (e) => this.onContextMenu(e));
 
     this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enableDamping = false;
@@ -671,6 +672,54 @@ export class Viewer extends EventTarget {
     return copy;
   }
 
+  /**
+   * Swap a model for its parts (from splitParts in split.js). Each part keeps its place on the
+   * plate and the model's scale; a part that lands on another (it was stacked on top of it) moves
+   * to a free spot. One Undo step puts the model back.
+   */
+  splitModel(model, parts) {
+    const index = this.models.indexOf(model);
+    if (index < 0 || parts.length < 2) return [];
+    const s = model.mesh.scale;
+    const made = parts.map((p, i) => {
+      const m = new Model(`${model.name} ${i + 1}`, p.positions);
+      m.mesh.scale.copy(s);
+      m.position.set(model.position.x + p.cx * s.x, model.position.y + p.cy * s.y, 0);
+      this.paint(m);
+      return m;
+    });
+    const footprint = (m) => {
+      const z = m.size;
+      return [m.position.x - z.x / 2, m.position.y - z.y / 2, m.position.x + z.x / 2, m.position.y + z.y / 2];
+    };
+    const onTop = made.filter((m, i) => made.slice(0, i).some((o) => {
+      const [a0, a1, a2, a3] = footprint(m), [b0, b1, b2, b3] = footprint(o);
+      return a0 < b2 && b0 < a2 && a1 < b3 && b1 < a3;
+    }));
+    this.detach(model);
+    made.forEach((m, i) => this.attach(m, index + i));
+    for (const m of onTop) this.placeFree(m);
+    const places = made.map((m) => m.position.clone());
+    this.record({
+      label: `split ${model.name}`,
+      undo: () => {
+        made.forEach((m) => this.detach(m));
+        this.attach(model, index);
+      },
+      redo: () => {
+        this.detach(model);
+        made.forEach((m, i) => {
+          m.position.copy(places[i]);
+          this.attach(m, index + i);
+        });
+      },
+      models: [model, ...made],
+    });
+    this.selectMany(made, made.at(-1));
+    this.changed();
+    return made;
+  }
+
   select(model) {
     this.selectMany(model ? [model] : [], model ?? null);
   }
@@ -1104,6 +1153,7 @@ export class Viewer extends EventTarget {
       return;
     }
     this.down = { x: e.clientX, y: e.clientY };
+    if (e.button === 2) this.rightDown = { x: e.clientX, y: e.clientY };
     if (this.stage === 'preview') return; // the camera still works; models cannot be touched
     if (e.button !== 0 || e.shiftKey) return; // right-drag and Shift + drag pan the camera
     if (!this.layFlatPicking && !(e.ctrlKey || e.metaKey)) {
@@ -1216,6 +1266,27 @@ export class Viewer extends EventTarget {
       if (!this.pick(e)) this.select(null);
     }
     this.down = null;
+  }
+
+  // Right-click (or a long press on a touch screen) asks the page for a menu: emits 'menu' with the
+  // model under the pointer (selected first, like Cura) or null for empty space. A right-drag pans
+  // the camera instead, so it gets no menu. (Windows sends the event after the button comes up,
+  // Mac and Chromebooks while it is down: either way it is measured from where it went down.)
+  onContextMenu(e) {
+    e.preventDefault();
+    const start = this.rightDown;
+    this.rightDown = null;
+    if (this.stage === 'preview' || this.ringDrag || this.layFlatPicking) return;
+    if (this.drag) {
+      if (this.drag.moved) return;
+      // A long press on a model starts a drag that never moved: drop it and show the menu.
+      this.drag = null;
+      this.canvas.style.cursor = '';
+    }
+    if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) >= 5) return;
+    const hit = this.pick(e);
+    if (hit && !this.selection.has(hit.model)) this.select(hit.model);
+    this.emit('menu', { model: hit?.model ?? null, x: e.clientX, y: e.clientY });
   }
 
   // ---- Saving the plate in the browser (plate-store.js) --------------------------------------

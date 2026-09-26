@@ -10,6 +10,7 @@ import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
 import { meshHealth } from './mesh-health.js';
 import { clearPlate, loadPlate, savePlate } from './plate-store.js';
 import { SettingsPanel } from './settings-panel.js';
+import { splitParts } from './split.js';
 import { initThemeButton, isDark, onThemeChange } from './theme.js';
 import { Viewer } from './viewer.js';
 
@@ -357,6 +358,7 @@ function renderGroupPanel(p) {
   p.append(el('span', { class: 'sub-label' }, 'Scale each (from its file size)'), scale);
   p.append(button('⊕ Center the group on the bed', () => viewer.centerSelected(), 'wide'));
   p.append(button('▦ Arrange everything', () => viewer.arrangeAll(), 'wide'));
+  p.append(button('✂ Split each into separate objects', splitSelected, 'linkbtn'));
 }
 
 function renderTools() {
@@ -391,6 +393,7 @@ function renderTools() {
     p.append(grid);
     p.append(el('p', { class: 'note' }, 'Drag the model to move it. It always sits on the bed. 0, 0 is the middle.'));
     p.append(button('⊕ Center on the bed', () => viewer.setPosition(m, 0, 0), 'wide'));
+    p.append(button('✂ Split into separate objects', splitSelected, 'linkbtn'));
   }
 
   if (tool === 'scale') {
@@ -514,6 +517,130 @@ function renderObjects() {
     list.append(li);
   }
 }
+
+// ---- Split a model into its separate parts ------------------------------------------------------
+
+// One STL with several things in it (a whole set of keychains) becomes one object per thing, so
+// each can be moved, turned and laid flat on its own. See split.js for what counts as one thing.
+async function splitSelected() {
+  const list = viewer.selectedList;
+  if (!list.length) return;
+  busy('Looking for separate parts…');
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+  let plan;
+  try {
+    plan = list.map((m) => ({ m, parts: splitParts(m.geometry.attributes.position.array) })).filter((p) => p.parts);
+  } finally {
+    busy(null);
+  }
+  if (!plan.length) {
+    toast(list.length === 1
+      ? `"${list[0].name}" is all one piece, so there is nothing to split. (Parts that touch or overlap stay together.)`
+      : 'Each of these is all one piece, so there is nothing to split.', { timeout: 8000 });
+    return;
+  }
+  const total = viewer.models.length + plan.reduce((n, p) => n + p.parts.length - 1, 0);
+  if (total > LIMITS.maxObjects) {
+    toast(`Splitting makes ${total} objects, and the most for one plate is ${LIMITS.maxObjects}. Remove some first, or print this one as it is.`, { kind: 'error', timeout: 10000 });
+    return;
+  }
+  const made = [];
+  viewer.transaction('split', () => {
+    for (const { m, parts } of plan) made.push(...viewer.splitModel(m, parts));
+  });
+  viewer.selectMany(made, made.at(-1));
+  for (const m of made) checkHealth(m, { quiet: true });
+  const entry = viewer.undoStack.at(-1);
+  toast(`Split into ${made.length} objects.`, {
+    action: () => {
+      if (viewer.undoStack.at(-1) === entry) undo();
+      else toast('Something else changed since then. Use the Undo button to step back.', { key: 'history' });
+    },
+    actionLabel: 'Undo',
+    key: 'history',
+  });
+}
+
+// ---- Right-click menu on the plate ------------------------------------------------------------
+
+const menu = $('#ctxMenu');
+
+function closeMenu() {
+  if (menu.hidden) return;
+  menu.hidden = true;
+  menu.innerHTML = '';
+}
+
+function openMenu({ model, x, y }) {
+  const count = viewer.selection.size;
+  const items = model
+    ? [
+      ['✂', count > 1 ? 'Split each into separate objects' : 'Split into separate objects', splitSelected],
+      null,
+      ['⧉', 'Copy', duplicateSelected, 'Ctrl+D'],
+      ['⬇', count > 1 ? 'Lay each one flat' : 'Biggest flat side down', () => viewer.forSelected('lay flat', (m) => viewer.layFlatAuto(m))],
+      ['⊕', 'Center on the bed', () => viewer.centerSelected()],
+      ['⌖', 'Zoom to it', () => viewer.frameSelection(), 'F'],
+      null,
+      ['🗑', count > 1 ? `Delete ${count} models` : 'Delete', () => viewer.removeSelected(), 'Del', 'danger'],
+    ]
+    : [
+      ['📂', 'Open model', openPicker, 'Ctrl+O'],
+      ...(viewer.models.length ? [
+        ['▣', 'Select all', () => viewer.selectAll(), 'Ctrl+A'],
+        ['▦', 'Arrange all', () => viewer.arrangeAll(), 'Ctrl+R'],
+      ] : []),
+    ];
+  menu.innerHTML = '';
+  for (const item of items) {
+    if (!item) {
+      menu.append(el('hr'));
+      continue;
+    }
+    const [icon, label, run, keys, cls] = item;
+    const b = el('button', { type: 'button', role: 'menuitem', class: cls });
+    b.append(el('span', { class: 'ctx-icon', 'aria-hidden': 'true' }, icon), el('span', {}, label));
+    if (keys) b.append(el('span', { class: 'ctx-key' }, keys));
+    b.addEventListener('click', () => {
+      closeMenu();
+      run();
+    });
+    menu.append(b);
+  }
+  menu.hidden = false;
+  // Keep it on screen: open up or left of the pointer when there is no room.
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, x + r.width > innerWidth - 4 ? x - r.width : x)}px`;
+  menu.style.top = `${Math.max(4, y + r.height > innerHeight - 4 ? y - r.height : y)}px`;
+  menu.querySelector('button').focus({ preventScroll: true });
+}
+
+viewer.addEventListener('menu', (e) => openMenu(e.detail));
+menu.addEventListener('keydown', (e) => {
+  const buttons = [...menu.querySelectorAll('button')];
+  const i = buttons.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    buttons[(i + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length].focus();
+  } else if (e.key === 'Escape' || e.key === 'Tab') {
+    e.preventDefault();
+    closeMenu();
+  }
+  e.stopPropagation(); // plate shortcuts (Delete, Escape, arrows) wait while the menu is open
+});
+// Escape closes it even when focus has wandered off it.
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || menu.hidden) return;
+  e.stopPropagation();
+  closeMenu();
+}, true);
+// Any press outside the menu, scrolling, resizing or leaving the page closes it.
+window.addEventListener('pointerdown', (e) => {
+  if (!menu.contains(e.target)) closeMenu();
+}, true);
+window.addEventListener('resize', closeMenu);
+window.addEventListener('blur', closeMenu);
+document.addEventListener('wheel', closeMenu, { passive: true, capture: true });
 
 // ---- Views ------------------------------------------------------------------------------------
 
