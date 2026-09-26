@@ -1,0 +1,33 @@
+// The plate comes back after a reload; "Start fresh" empties it for good.
+import { chromium } from 'playwright-core';
+import { BASE, CHROME, ensureMushroom } from './lib.mjs';
+const base = (process.argv[2] || BASE) + '?debug';
+const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+const errors = [];
+page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+const check = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}: ${JSON.stringify(got)}${ok ? '' : ` (want ${JSON.stringify(want)})`}`); if (!ok) process.exitCode = 1; };
+const state = () => page.evaluate(() => window.umm.viewer.models.map((m) => [m.name, Math.round(m.position.x), Math.round(m.position.y), Math.round(m.size.x), Math.round(m.size.y), Math.round(m.size.z)]));
+await page.goto(base);
+await page.waitForTimeout(500);
+check('starts empty', await state(), []);
+await page.click('#sample');
+await page.setInputFiles('#fileInput', ensureMushroom());
+await page.waitForTimeout(300);
+await page.evaluate(() => { const v = window.umm.viewer; v.rotate(v.models[1], 'x', 90); v.setScale(v.models[0], 150, 150, 150); v.setPosition(v.models[0], -60, 40); });
+const before = await state();
+await page.waitForTimeout(2200); // saved 1.5 s after the last change
+await page.reload();
+await page.waitForFunction(() => window.umm?.viewer.models.length === 2, null, { timeout: 10000 });
+check('plate back after reload (names, places, sizes, turns)', await state(), before);
+check('toast offers a fresh start', await page.$eval('.toast .toast-action', (b) => b.textContent), 'Start fresh');
+check('undo history starts empty', await page.$eval('#undoBtn', (b) => b.disabled), true);
+check('overhang paint restored', await page.evaluate(() => window.umm.viewer.models[1].overhangArea > 0), true);
+await page.click('.toast .toast-action');
+check('start fresh empties the plate', await state(), []);
+await page.waitForTimeout(300);
+await page.reload();
+await page.waitForTimeout(1500);
+check('still empty after another reload', await state(), []);
+console.log(errors.join('\n') || 'no errors');
+await browser.close();

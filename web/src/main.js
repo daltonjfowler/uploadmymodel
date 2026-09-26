@@ -7,6 +7,7 @@ import { LIMITS, PRINTER, safeNamePart, summarize } from '../../shared/settings.
 import { $, el, esc, fmt } from './dom.js';
 import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.js';
 import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
+import { clearPlate, loadPlate, savePlate } from './plate-store.js';
 import { SettingsPanel } from './settings-panel.js';
 import { initThemeButton, isDark, onThemeChange } from './theme.js';
 import { Viewer } from './viewer.js';
@@ -614,7 +615,20 @@ function plateChanged() {
 viewer.addEventListener('change', () => {
   plateChanged();
   renderTools();
+  scheduleSave();
 });
+
+// Save the plate in this browser a moment after it stops changing (not mid-drag).
+let saveTimer = null;
+let restoring = true; // no saving until the saved plate (if any) is back
+function scheduleSave() {
+  if (restoring) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    if (viewer.busy) return scheduleSave();
+    savePlate(viewer.snapshot());
+  }, 1500);
+}
 viewer.addEventListener('select', () => {
   renderTools();
   renderObjects();
@@ -838,3 +852,21 @@ new ResizeObserver(() => {
 plateChanged();
 viewer.setGizmo(tool === 'rotate' ? 'rotate' : null);
 renderTools();
+
+// Bring back the plate from last time (a reloaded or crashed tab).
+loadPlate().then((saved) => {
+  if (saved && !viewer.models.length) {
+    viewer.restore(saved.items);
+    const n = saved.items.length;
+    toast(`Your plate from last time is back (${n} object${n === 1 ? '' : 's'}).`, {
+      action: () => {
+        viewer.clear();
+        clearPlate();
+      },
+      actionLabel: 'Start fresh',
+      timeout: 9000,
+    });
+  }
+}).finally(() => {
+  restoring = false;
+});

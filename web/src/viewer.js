@@ -1217,6 +1217,38 @@ export class Viewer extends EventTarget {
     this.down = null;
   }
 
+  // ---- Saving the plate in the browser (plate-store.js) --------------------------------------
+
+  /** Everything needed to rebuild the plate: shapes (with turns baked in), originals, scale, place. */
+  snapshot() {
+    return this.models.map((m) => ({
+      name: m.name,
+      positions: m.geometry.attributes.position.array.slice(),
+      original: m.original,
+      scale: [m.mesh.scale.x, m.mesh.scale.y, m.mesh.scale.z],
+      position: [m.position.x, m.position.y],
+    }));
+  }
+
+  /** Put saved models back. Not an Undo step: the history starts fresh. */
+  restore(items) {
+    for (const it of items) {
+      const m = new Model(it.name, it.positions);
+      m.original = it.original;
+      m.mesh.scale.set(...it.scale);
+      m.position.set(it.position[0], it.position[1], 0);
+      this.paint(m);
+      m.mesh.visible = this.stage !== 'preview';
+      this.models.push(m);
+      this.scene.add(m.mesh);
+    }
+    this.undoStack = [];
+    this.redoStack = [];
+    this.select(null);
+    this.changed();
+    this.emit('history');
+  }
+
   // ---- Preview: G-code layers ---------------------------------------------------------------
   // One thick-line object per line type (outer wall, infill, ...). All of a type's lines are in one
   // buffer in layer order, so showing layers 0..n is just "draw the first k lines".

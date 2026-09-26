@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const base = process.argv[2] || 'http://127.0.0.1:8787/';
 const key = process.argv[3] || 'local-test-key-not-real';
 const live = !/127\.0\.0\.1|localhost/.test(base);
-const tests = ['undo', 'angle', 'multi', 'preview', 'teacher', 'fixes', ...(live ? [] : ['e2e'])];
+const tests = ['undo', 'angle', 'multi', 'preview', 'autosave', 'teacher', 'fixes', ...(live ? [] : ['e2e'])];
 let failed = 0;
 for (const t of tests) {
   const file = fileURLToPath(new URL(`./${t}.test.mjs`, import.meta.url));
