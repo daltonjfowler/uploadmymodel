@@ -4,9 +4,10 @@ CuraEngine **4.13.2** taken from the official Cura LulzBot Edition 4.13.2 AppIma
 the school uses, checked by SHA-256 at build time), Cura's own 4.13.2 resource files from the same
 AppImage, the resolver from `engine/`, and a small HTTP service (`server.py`). Image: about 200 MB.
 
-**Status (2026-09-26): works locally, not deployed.** The live site still answers 501 for Slice.
-The go-live wiring (Cloudflare Container binding, fair-use limits, teacher warm-up button) is ready
-on the **`slicer-live`** branch; its `docs/GO_LIVE.md` has the checklist and the undo steps.
+**Status (2026-09-26): live** on uploadmymodel.com as the Cloudflare Container
+`uploadmymodel-slicercontainer` (1 vCPU / 3 GiB, max 2, sleeps after 2 minutes; `src/index.js`,
+`wrangler.jsonc`). A supported Benchy took 14.5 s live. `docs/GO_LIVE.md` has the costs and the undo
+steps. Locally, `SLICER_URL` in `.dev.vars` still points the Worker at the Docker container.
 Deploying it as a Cloudflare Container costs container time from the allowance shared with
 uploadmycode and uploadmylaser, so that is Dalton's call (see "Before going live").
 

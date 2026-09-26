@@ -1,8 +1,10 @@
-# Turning on slicing (branch `slicer-live`)
+# Turning on slicing
 
-Everything needed to put the slicer online is on the `slicer-live` branch. `main` (the live site)
-stays at "engine not connected" until this is merged and deployed. **Deploying this starts paying
-for container time** from the allowance shared with uploadmycode and uploadmylaser.
+**Done 2026-09-26** (Dalton's go): `slicer-live` was merged into `main` and deployed. Container app
+`uploadmymodel-slicercontainer` (a03c4da0-c29e-48ea-a202-269781865e5e), 1 vCPU / 3 GiB, max 2,
+sleeps after 2 minutes. Measured live: the sample piece 1.1 s from click to Preview, a supported
+Benchy 14.5 s. Container time is billed from the allowance shared with uploadmycode and
+uploadmylaser.
 
 ## What the branch adds
 

@@ -5,12 +5,9 @@ What works today (2026-09-26) and how to run it. Student steps are in
 
 ## Status
 
-- **Live now:** the student page (open, arrange, settings, Preview of any `.gcode` file) and the
-  teacher page.
-- **Not live yet: slicing.** Slice checks everything and then says the engine is not connected.
-  The slicer works on the development PC (`container/README.md`). Putting it online needs a
-  decision on Cloudflare container cost; the switch is ready on the `slicer-live` branch
-  (`docs/GO_LIVE.md` there).
+- **Live (2026-09-26):** the student page, real slicing (school's Cura LE 4.13.2 engine, about
+  15 s for a supported Benchy), and the teacher page.
+- Slicing only works while you have it open for the class (below). Everything else works any time.
 
 ## The teacher page
 
@@ -55,12 +52,9 @@ Cura LulzBot Edition 4.13.2's own profile files (the version the school uses), t
 
 ## Decisions waiting for you
 
-1. **Going live with the slicer** (1 vCPU / 3 GiB: a supported Benchy in about 16 s; roughly
-   $0.03-0.06 per busy class period, nothing outside open windows). See `docs/GO_LIVE.md` on the
-   `slicer-live` branch.
-2. **Student name on the printer screen** during the print (an `M117` line)? Today it is only in
+1. **Student name on the printer screen** during the print (an `M117` line)? Today it is only in
    the file name, which students can change.
-3. At school: note the Cura LE version (Help → About), print one file from uploadmymodel next to
+2. At school: note the Cura LE version (Help → About), print one file from uploadmymodel next to
    one from school Cura, and run the **printer USB test** (`/usb-test/`) on a Chromebook for
    "print from USB" (`docs/USB_PRINTING.md`).
 

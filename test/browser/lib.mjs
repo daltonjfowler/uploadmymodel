@@ -2,6 +2,7 @@
 //   BASE:   site to test (first argument of each test, default local wrangler dev)
 //   CHROME: Chrome binary (env CHROME_PATH, default the usual Windows install)
 //   OUT:    folder for screenshots and generated models (gitignored)
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -37,10 +38,16 @@ export function ensureMushroom() {
 }
 
 // The class gate (shared/slicing.js): tests that slice open it with this phrase and give the page
-// the phrase, so they do not have to type it.
-export const TEST_PHRASE = 'test-phrase-please';
+// the phrase, so they do not have to type it. Random for every run (the runner passes its own to
+// the tests), never a fixed phrase: this repo is public, and an open window on the live site with a
+// known phrase would let anyone slice.
+export const TEST_PHRASE = process.env.UMM_TEST_PHRASE || `test-${randomBytes(6).toString('hex')}`;
 
-export async function openSlicing(request, base, key, minutes = 90) {
+export async function closeSlicing(request, base, key) {
+  return request.delete(`${base.replace(/\?.*$/, '')}api/teacher/slicing`, { headers: { 'x-teacher-key': key } });
+}
+
+export async function openSlicing(request, base, key, minutes = 15) {
   return request.put(`${base.replace(/\?.*$/, '')}api/teacher/slicing`, {
     headers: { 'x-teacher-key': key, 'content-type': 'application/json' },
     data: { phrase: TEST_PHRASE, minutes },

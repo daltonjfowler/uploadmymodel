@@ -1,6 +1,6 @@
 // The teacher's longest-print limit, end to end with the slicer (local only: needs SLICER_URL).
 import { chromium } from 'playwright-core';
-import { BASE, CHROME, knowPhrase, openSlicing } from './lib.mjs';
+import { BASE, CHROME, closeSlicing, knowPhrase, openSlicing } from './lib.mjs';
 const base = process.argv[2] || BASE;
 const key = process.argv[3] || 'local-test-key-not-real';
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -31,5 +31,7 @@ await page.click('#action button.primary');
 await page.waitForSelector('#previewCard:not([hidden])', { timeout: 60000 });
 check('under the limit: sliced', await page.evaluate(() => document.body.dataset.stage), 'preview');
 check('teacher removes the limit', (await put({})).status(), 200);
+// Run on its own (not from run.mjs): close the slicing window this test opened.
+if (!process.env.UMM_TEST_PHRASE) await closeSlicing(page.request, base, key);
 console.log(errors.join('\n') || 'no errors');
 await browser.close();

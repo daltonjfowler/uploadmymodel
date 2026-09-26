@@ -1,7 +1,7 @@
 // Teacher page end to end, against local dev (key from .dev.vars) or a base URL + key.
 import { chromium } from 'playwright-core';
 import { BASE, BENCHY, CHROME, OUT, ensureMushroom } from './lib.mjs';
-import { TEST_PHRASE, openSlicing } from './lib.mjs';
+import { TEST_PHRASE, closeSlicing, openSlicing } from './lib.mjs';
 const base = process.argv[2] || BASE;
 const key = process.argv[3] || 'local-test-key-not-real';
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -75,5 +75,7 @@ await page.fill('#message', '');
 await page.click('#save');
 await page.waitForSelector('#status[data-tone="ok"]');
 check('reset saved', await page.$eval('#status', (e) => e.textContent), 'Saved. Students can change every setting.');
+// Run on its own (not from run.mjs): close the slicing window this test opened.
+if (!process.env.UMM_TEST_PHRASE) await closeSlicing(page.request, base, key);
 console.log(errors.join('\n') || 'no errors');
 await browser.close();

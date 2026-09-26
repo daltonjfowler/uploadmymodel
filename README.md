@@ -7,10 +7,11 @@ an SD card. Temperatures, speeds and start/end G-code come only from the teacher
 Internal district tool, sibling of [uploadmycode](https://uploadmycode.com) and
 [uploadmylaser](https://uploadmylaser.com). Made by [Dalton Fowler](https://daltonjfowler.com).
 
-**Status:** the student page is live at https://uploadmymodel.com, with a teacher page at
-[/teacher/](https://uploadmymodel.com/teacher/) to lock settings and set class defaults. The
-slicing engine is not connected yet, so Slice checks everything and then says so. See
-[PLAN.md](PLAN.md).
+**Status (2026-09-26):** live at https://uploadmymodel.com with real slicing: school's CuraEngine
+4.13.2 in a Cloudflare Container (1 vCPU / 3 GiB; a supported Benchy slices in about 15 s). The
+teacher page ([/teacher/](https://uploadmymodel.com/teacher/)) opens slicing for a class with a
+phrase, locks settings and sets class defaults; the rest of the site works without it. See
+[PLAN.md](PLAN.md) and [docs/GO_LIVE.md](docs/GO_LIVE.md).
 
 Guides: [students](docs/STUDENT_GUIDE.md) · [teachers](docs/TEACHER_GUIDE.md).
 

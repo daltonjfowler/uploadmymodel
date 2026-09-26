@@ -16,7 +16,8 @@ and no student accounts.
 | sent over Web Serial | sent over Web Serial | **downloaded**, copied to SD card by hand |
 | Uno board fixed on the server | power/speed presets on the server | print profiles frozen on the server |
 
-**Update 2026-09-26:** the slicer works locally: `container/` runs school's exact CuraEngine
+**Live 2026-09-26:** real slicing is on uploadmymodel.com (Cloudflare Container, 1 vCPU / 3 GiB,
+Benchy in about 15 s), gated by the teacher's class phrase. Earlier the same day: the slicer worked locally: `container/` runs school's exact CuraEngine
 (4.13.2, from the official AppImage) with a resolver, and the site slices through it end to end in
 local dev (real G-code, Preview, Save). Not deployed yet. Also built: teacher page, Preview tab,
 undo, multi-select, rotate rings. Open decision: tree supports at 0% infill print about half the

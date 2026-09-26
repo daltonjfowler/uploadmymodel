@@ -37,8 +37,11 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   setting formulas from the school version's files (`engine/res4132/`, never edit them);
   `engine/run.py` slices with CuraEngine. `engine/test_resolve.py` checks against the reference.
 - `container/`: the slicer service (CuraEngine 4.13.2 from the official AppImage + resolver +
-  `server.py`). Local only: the Worker uses it when `SLICER_URL` is set (`.dev.vars`), else 501.
-  Not deployed to Cloudflare (container cost is Dalton's call). See container/README.md.
+  `server.py`). LIVE since 2026-09-26 as a Cloudflare Container (`src/index.js` SlicerContainer,
+  `wrangler.jsonc`: 1 vCPU / 3 GiB, max 2, sleepAfter 2m). `npm run deploy` rebuilds and pushes
+  the image when it changes. Locally the Worker uses `SLICER_URL` (`.dev.vars`) instead, and
+  `npm run dev` runs with `--enable-containers=false` (Windows cannot run containers in wrangler).
+  Container time costs money: never loosen the class gate or the rate limits.
 - `profiles/current_lulzbot_9_18.json`: the class profile, decoded from the school G-code footer.
 - `test/golden/*.gcode`: real G-code sliced by school Cura. Stored byte for byte (`-text`).
 - `test/*.test.mjs`: settings, server and G-code reader checks (`npm test`).
