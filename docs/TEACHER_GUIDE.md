@@ -36,6 +36,14 @@ first time they press Slice. Everything else on the site works without it. **Clo
 early; otherwise it closes by itself. While it is closed nobody can wake the slicer, so there is
 nothing to pay for.
 
+## One password for all three sites (later)
+
+Each site checks its own `TEACHER_KEY` secret. The simplest way to share one password is to set
+the same key on all three: run `npx wrangler secret put TEACHER_KEY` in each project folder
+(uploadmycode, uploadmylaser, uploadmymodel) and paste the same key. For a separate password per
+person (you and a coworker, each one removable on its own), the sites would need a small change
+to accept a list of keys.
+
 ## What students can never change
 
 Temperatures, speeds, cooling, retraction, start and end G-code, and the filament. These come from

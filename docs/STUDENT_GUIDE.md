@@ -42,7 +42,8 @@ Settings with a 🔒 are set by your teacher.
 
 1. Type your first name. The **File name** fills itself in (your name + the model); change it if
    you like. Keep it short so you can find it on the printer screen.
-2. Press **Slice**. Supports can take a minute.
+2. Press **Slice**. The first time, type the **class phrase** from the board. (Slicing only works
+   while your teacher has it open; you can set up your model any time.) Supports can take a minute.
 3. Look at **Preview**: drag the layer slider to watch your print build up.
 4. Press **Save to SD card**. In the window that opens, pick the class SD card and press Save.
    Then **eject the card** before you pull it out.
