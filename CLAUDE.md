@@ -65,5 +65,7 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
 :8787), `npm test`, `npm run test:browser`, `npm run deploy`, `npm run icons`.
 
 Windows: run wrangler dev with `--ip 127.0.0.1 --local-upstream localhost`, or the Worker sees the
-real domain and redirects. After each `npm run build`, restart wrangler dev: it keeps serving the
+real domain and redirects. Local wrangler dev (4.127) also exits with "Network connection lost"
+when a browser drops a request mid-flight (fast reload, test closing a page); just restart it. The
+live site is not affected. After each `npm run build`, restart wrangler dev: it keeps serving the
 old asset list and the new hashed JS file 404s.

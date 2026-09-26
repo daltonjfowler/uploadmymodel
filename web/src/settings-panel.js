@@ -308,7 +308,7 @@ export class SettingsPanel extends EventTarget {
       rows.append(this.customRow(defOf('support')));
     } else {
       const on = el('div', { class: 'row' });
-      on.append(el('span', { class: 'row-label' }, 'Generate support'), this.supportToggle(''));
+      on.append(el('span', { class: 'row-label' }, 'Generate support'), this.supportToggle('', 'Generate support'));
       this.hintOn(on, 'Generate support', defOf('support').help);
       rows.append(on);
       if (s.support !== 'none') {
@@ -320,11 +320,11 @@ export class SettingsPanel extends EventTarget {
     if (s.support !== 'none') rows.append(this.customRow(defOf('supportAngle')));
   }
 
-  supportToggle(label = 'Tree supports') {
+  supportToggle(label = 'Tree supports', ariaLabel) {
     const s = this.settings;
     return this.toggle(label, s.support !== 'none', (on) => {
       this.set('support', on ? (this.lastPlacement ?? 'buildplate') : 'none');
-    }, label ? 'Hollow tree branches hold up parts that hang in the air.' : undefined);
+    }, label ? 'Hollow tree branches hold up parts that hang in the air.' : ariaLabel);
   }
 
   placementPicker() {
@@ -433,7 +433,8 @@ export class SettingsPanel extends EventTarget {
 
   toggle(label, on, onChange, help) {
     const row = el('label', { class: 'toggle' });
-    const input = el('input', { type: 'checkbox', role: 'switch' });
+    // No visible text (the Custom row shows its label beside it): name it for screen readers.
+    const input = el('input', { type: 'checkbox', role: 'switch', 'aria-label': label ? null : help ?? 'Generate support' });
     input.checked = on;
     input.addEventListener('change', () => onChange(input.checked));
     row.append(input, el('span', { class: 'switch', 'aria-hidden': 'true' }), el('span', {}, label));
