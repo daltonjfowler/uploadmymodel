@@ -153,6 +153,8 @@ $('#load').addEventListener('click', async () => {
     renderRows();
     $('#setup').hidden = false;
     $('#warmCard').hidden = false;
+    $('#slicingCard').hidden = false;
+    loadSlicing();
     say('Class setup loaded.', 'ok');
   } catch (e) {
     say(e.message, 'error');
@@ -189,6 +191,77 @@ $('#warmup').addEventListener('click', async () => {
     $('#warmStatus').textContent = r.ok ? `Ready (${j.engine ?? 'slicer'}, answered in ${j.seconds} s).` : (j.message ?? `Not ready (${r.status}).`);
   } catch {
     $('#warmStatus').textContent = 'Could not reach the server.';
+  }
+});
+
+// ---- Slicing window + class phrase ------------------------------------------------------------------
+
+async function slicingApi(method, body) {
+  const r = await fetch('/api/teacher/slicing', {
+    method,
+    headers: { 'x-teacher-key': keyInput.value.trim(), ...(body ? { 'content-type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.message ?? `Something went wrong (${r.status}).`);
+  return j;
+}
+
+let slicingTimer = null;
+function showSlicing(s) {
+  const now = $('#slicingNow');
+  const open = s.open && s.until > Date.now();
+  clearInterval(slicingTimer);
+  const paint = () => {
+    const left = Math.max(0, Math.round((s.until - Date.now()) / 60000));
+    now.textContent = open
+      ? `Slicing is open until ${new Date(s.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} (${left} min left).`
+      : 'Slicing is closed. Students can still open and set up models.';
+    if (open && s.until <= Date.now()) loadSlicing();
+  };
+  now.className = `slicing-now ${open ? 'open' : 'closed'}`;
+  $('#bigPhrase').hidden = !open;
+  $('#bigPhrase').textContent = open ? s.phrase : '';
+  paint();
+  if (open) slicingTimer = setInterval(paint, 30_000);
+  $('#slicingNote').textContent = s.engine === false ? 'No slicer is connected to this site yet, so Slice still says "not connected".' : '';
+}
+
+async function loadSlicing() {
+  try {
+    const s = await slicingApi('GET');
+    if (!$('#phraseSet').value) $('#phraseSet').value = s.phrase ?? s.suggestion ?? '';
+    showSlicing(s);
+  } catch (e) {
+    $('#slicingNote').textContent = e.message;
+  }
+}
+
+$('#phraseNew').addEventListener('click', async () => {
+  try {
+    $('#phraseSet').value = (await slicingApi('GET')).suggestion;
+  } catch (e) {
+    $('#slicingNote').textContent = e.message;
+  }
+});
+
+$('#slicingOpen').addEventListener('click', async () => {
+  try {
+    const s = await slicingApi('PUT', { phrase: $('#phraseSet').value, minutes: Number($('#slicingMinutes').value) });
+    $('#phraseSet').value = s.phrase;
+    showSlicing(s);
+    say(`Slicing is open. Put "${s.phrase}" on the board.`, 'ok');
+  } catch (e) {
+    say(e.message, 'error');
+  }
+});
+
+$('#slicingClose').addEventListener('click', async () => {
+  try {
+    showSlicing(await slicingApi('DELETE'));
+    say('Slicing is closed.', 'ok');
+  } catch (e) {
+    say(e.message, 'error');
   }
 });
 

@@ -14,6 +14,59 @@ import { initThemeButton, isDark, onThemeChange } from './theme.js';
 import { Viewer } from './viewer.js';
 
 const STORE_NAME = 'umm.name';
+const STORE_PHRASE = 'umm.phrase'; // this tab only (sessionStorage), like the sister sites
+
+// Is slicing open? Asked of the Worker (never the slicer, so it costs nothing): on load, every two
+// minutes, and before each slice. engine=false means this site has no slicer, so no gate.
+let slicing = { engine: false, open: false, until: null };
+async function refreshSlicing() {
+  try {
+    const r = await fetch('/api/slicing', { cache: 'no-store' });
+    if (r.ok) slicing = await r.json();
+  } catch { /* offline: keep what we knew */ }
+  return slicing;
+}
+
+function storedPhrase() {
+  try {
+    return sessionStorage.getItem(STORE_PHRASE) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** Ask for the class phrase. Resolves with it, or '' if they cancel. */
+function askPhrase(error) {
+  const dialog = $('#phraseDialog');
+  const input = $('#phraseInput');
+  input.value = error ? '' : storedPhrase();
+  $('#phraseError').hidden = !error;
+  $('#phraseError').textContent = error ?? '';
+  dialog.showModal();
+  input.focus();
+  // Enter means "Slice" (the form's first button is Cancel).
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      dialog.close('ok');
+    }
+  };
+  return new Promise((resolve) => {
+    dialog.addEventListener('close', () => {
+      const phrase = dialog.returnValue === 'ok' ? input.value.trim() : '';
+      if (phrase) {
+        try {
+          sessionStorage.setItem(STORE_PHRASE, phrase);
+        } catch { /* fine: asked again next time */ }
+      }
+      resolve(phrase);
+    }, { once: true });
+  });
+}
+
+function clockTime(ms) {
+  return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
 
 const viewer = new Viewer($('#viewport'), PRINTER);
 const panel = new SettingsPanel($('#settings'), $('#hint'));
@@ -593,7 +646,13 @@ function renderAction() {
     card.append(el('p', { class: 'advice warn' }, slice.message));
   }
 
-  const go = el('button', { type: 'button', class: 'primary big wide', disabled: outside.length ? '' : null }, 'Slice');
+  const closed = slicing.engine && !slicing.open;
+  if (slicing.engine) {
+    card.append(el('p', { class: `slicing-status ${closed ? 'closed' : 'open'}` }, closed
+      ? 'Slicing is closed right now. Your teacher opens it during class. You can still set up your model.'
+      : `Slicing is open until ${clockTime(slicing.until)}.`));
+  }
+  const go = el('button', { type: 'button', class: 'primary big wide', disabled: outside.length || closed ? '' : null }, 'Slice');
   go.addEventListener('click', () => runSlice());
   card.append(go);
 }
@@ -624,13 +683,26 @@ async function runSlice() {
     clientId = localStorage.getItem('umm.client') ?? '';
     if (!clientId) localStorage.setItem('umm.client', (clientId = crypto.randomUUID()));
   } catch { /* no storage: the server falls back to the IP */ }
+  // The class gate (only when this site has a slicer).
+  await refreshSlicing();
+  let phrase = '';
+  if (slicing.engine) {
+    if (!slicing.open) {
+      renderAction();
+      toast('Slicing is closed right now. Your teacher opens it during class.', { kind: 'warn' });
+      return;
+    }
+    phrase = storedPhrase() || await askPhrase();
+    if (!phrase) return;
+  }
   sliceAbort = new AbortController();
   slice = { state: 'slicing', startedAt: Date.now() };
   renderAction();
   try {
-    const res = await fetch('/api/slice', {
-      method: 'POST', body: form, signal: sliceAbort.signal, headers: clientId ? { 'x-client-id': clientId } : {},
-    });
+    const headers = {};
+    if (clientId) headers['x-client-id'] = clientId;
+    if (phrase) headers['x-class-phrase'] = phrase;
+    const res = await fetch('/api/slice', { method: 'POST', body: form, signal: sliceAbort.signal, headers });
     const type = res.headers.get('content-type') ?? '';
     if (res.ok && !type.includes('json')) {
       // The real thing (Phase 1): G-code comes straight back.
@@ -648,6 +720,18 @@ async function runSlice() {
       const body = type.includes('json') ? await res.json() : {};
       if (res.status === 501 && body.error === 'engine_not_ready') {
         slice = { state: 'done', notReady: true, fileName: body.fileName };
+      } else if (res.status === 403 && body.error === 'phrase') {
+        try {
+          sessionStorage.removeItem(STORE_PHRASE);
+        } catch { /* fine */ }
+        slice = { state: 'idle' };
+        sliceAbort = null;
+        renderAction();
+        if (await askPhrase(body.message)) runSlice();
+        return;
+      } else if (res.status === 403 && body.error === 'closed') {
+        await refreshSlicing();
+        slice = { state: 'error', message: body.message };
       } else {
         slice = { state: 'error', message: body.message ?? `The server said no (${res.status}). Try again in a minute.` };
       }
@@ -936,6 +1020,15 @@ fetch('/api/class')
     renderAction(); // the teacher's print-time limit shows there
   })
   .catch(() => {});
+
+// Whether slicing is open, now and every two minutes (the teacher may open or close it).
+refreshSlicing().then(() => renderAction());
+setInterval(() => {
+  const before = JSON.stringify(slicing);
+  refreshSlicing().then(() => {
+    if (JSON.stringify(slicing) !== before && slice.state !== 'slicing') renderAction();
+  });
+}, 120_000);
 
 // The settings card stops above the action card, however tall that is right now.
 new ResizeObserver(() => {

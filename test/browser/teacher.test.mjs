@@ -1,6 +1,7 @@
 // Teacher page end to end, against local dev (key from .dev.vars) or a base URL + key.
 import { chromium } from 'playwright-core';
 import { BASE, BENCHY, CHROME, OUT, ensureMushroom } from './lib.mjs';
+import { TEST_PHRASE, openSlicing } from './lib.mjs';
 const base = process.argv[2] || BASE;
 const key = process.argv[3] || 'local-test-key-not-real';
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -61,7 +62,8 @@ const stl = (() => {
   let o = 96; for (const p of pts) for (const n of p) { b.writeFloatLE(n, o); o += 4; }
   return b;
 })();
-const post = (settings) => page.request.post(base + 'api/slice', { multipart: { model: { name: 'p.stl', mimeType: 'model/stl', buffer: stl }, settings: JSON.stringify(settings), name: 'x', modelName: 'y' } });
+await openSlicing(page.request, base, key);
+const post = (settings) => page.request.post(base + 'api/slice', { headers: { 'x-class-phrase': TEST_PHRASE }, multipart: { model: { name: 'p.stl', mimeType: 'model/stl', buffer: stl }, settings: JSON.stringify(settings), name: 'x', modelName: 'y' } });
 const bad = await post({ walls: 2, infillDensity: 15 });
 check('server refuses unlocked change', [bad.status(), (await bad.json()).locked], [400, ['Wall count']]);
 const good = await post({ walls: 3, infillDensity: 15, quality: 'standard' });

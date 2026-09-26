@@ -40,6 +40,36 @@
       </div>
     </section>
 
+    <section id="slicingCard" class="card page-card" hidden>
+      <h2>Slicing for this class</h2>
+      <div class="slicing-box">
+        <p id="slicingNow" class="slicing-now closed">Slicing is closed.</p>
+        <p id="bigPhrase" class="big-phrase" hidden></p>
+        <p class="note">Students can open and set up models any time. Slicing only works while you have it
+          open, with this phrase on the board. The slicer (and its bill) sleeps the rest of the time.</p>
+        <label class="note" for="phraseSet">Class phrase</label>
+        <div class="phrase-row">
+          <input id="phraseSet" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Class phrase">
+          <button id="phraseNew" type="button">New phrase</button>
+        </div>
+        <label class="limit-row">
+          <span>Open for</span>
+          <select id="slicingMinutes" aria-label="Open slicing for">
+            <option value="50">1 period (50 minutes)</option>
+            <option value="90">A block (90 minutes)</option>
+            <option value="240">Half a day (4 hours)</option>
+            <option value="480">All day (8 hours)</option>
+            <option value="15">15 minutes (testing)</option>
+          </select>
+        </label>
+        <div class="setup-actions">
+          <button id="slicingOpen" class="primary" type="button">Open slicing</button>
+          <button id="slicingClose" type="button">Close now</button>
+          <span id="slicingNote" class="note"></span>
+        </div>
+      </div>
+    </section>
+
     <section id="setup" class="card page-card" hidden>
       <h2>Class settings</h2>
       <p class="note">Turn a setting off to lock it: students see it greyed out at your value, and the server
@@ -80,7 +110,6 @@
     <section class="card page-card">
       <h2>Coming next</h2>
       <ul class="plain">
-        <li>Class phrase, so only your students can slice (like uploadmycode and uploadmylaser).</li>
         <li>Size and copy limits.</li>
       </ul>
     </section>

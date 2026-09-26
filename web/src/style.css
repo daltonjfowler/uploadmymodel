@@ -303,6 +303,11 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .name-field .file-input input:focus { border: 0; }
 .file-ext { padding-right: 9px; color: var(--muted); font: 13px ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .file-name { margin: 0; font-size: .82rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.slicing-status { margin: 0; padding: 6px 10px; border-radius: 8px; font-size: .84rem; }
+.slicing-status.open { background: var(--ok-soft); color: var(--ok); }
+.slicing-status.closed { background: var(--card2); color: var(--muted); border: 1px dashed var(--line); }
+.phrase-field input, .phrase-big input { width: 100%; font: 600 1.1rem ui-monospace, "Cascadia Mono", Consolas, monospace; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card2); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .action-summary { margin: 0; font-size: .82rem; color: var(--muted); }
 .result { border-radius: 9px; padding: 9px 11px; font-size: .86rem; }
 .result p { margin: 4px 0 0; }
@@ -400,6 +405,13 @@ body.page { overflow: auto; }
 .setup-table tr.is-locked { background: repeating-linear-gradient(135deg, transparent 0 10px, color-mix(in srgb, var(--card2) 70%, transparent) 10px 20px); }
 textarea { font: inherit; color: inherit; width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; background: var(--card2); resize: vertical; }
 .setup-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.slicing-box { display: grid; gap: 10px; }
+.slicing-now { margin: 0; padding: 10px 12px; border-radius: 9px; font-weight: 600; }
+.slicing-now.open { background: var(--ok-soft); color: var(--ok); }
+.slicing-now.closed { background: var(--card2); color: var(--muted); }
+.big-phrase { margin: 0; font: 700 clamp(1.4rem, 5vw, 2.4rem) ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .02em; text-align: center; padding: 10px; border: 2px dashed var(--accent-line); border-radius: 12px; color: var(--accent); overflow-wrap: anywhere; }
+.phrase-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.phrase-row input { min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; background: var(--card2); font: 600 1rem ui-monospace, "Cascadia Mono", Consolas, monospace; }
 .limit-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .limit-row select { padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
 .status { margin: 0; min-height: 1.4em; font-weight: 600; }

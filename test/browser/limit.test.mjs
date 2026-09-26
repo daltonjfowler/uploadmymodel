@@ -1,10 +1,12 @@
 // The teacher's longest-print limit, end to end with the slicer (local only: needs SLICER_URL).
 import { chromium } from 'playwright-core';
-import { BASE, CHROME } from './lib.mjs';
+import { BASE, CHROME, knowPhrase, openSlicing } from './lib.mjs';
 const base = process.argv[2] || BASE;
 const key = process.argv[3] || 'local-test-key-not-real';
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+await knowPhrase(page);
+await openSlicing(page.request, base, key);
 const errors = [];
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 const check = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}: ${JSON.stringify(got)}${ok ? '' : ` (want ${JSON.stringify(want)})`}`); if (!ok) process.exitCode = 1; };
