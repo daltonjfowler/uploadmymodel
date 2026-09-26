@@ -14,6 +14,8 @@ const STORE_NAME = 'umm.name';
 
 const viewer = new Viewer($('#viewport'), PRINTER);
 const panel = new SettingsPanel($('#settings'), $('#hint'));
+// Browser tests reach the 3D view through this; only with ?debug in the address.
+if (new URLSearchParams(location.search).has('debug')) window.umm = { viewer, panel };
 
 let tool = 'move';
 let slice = { state: 'idle' }; // idle | slicing | done | error
@@ -149,14 +151,15 @@ window.addEventListener('drop', (e) => {
 function setTool(name) {
   tool = name;
   if (viewer.layFlatPicking) viewer.startLayFlatPick(false);
-  if (!viewer.selected && viewer.models.length === 1) viewer.select(viewer.models[0]);
+  if (!viewer.selection.size && viewer.models.length === 1) viewer.select(viewer.models[0]);
+  viewer.setGizmo(tool === 'rotate' ? 'rotate' : null);
   renderTools();
 }
 
 for (const b of document.querySelectorAll('.tool[data-tool]')) {
   b.addEventListener('click', () => setTool(b.dataset.tool));
 }
-$('#dupBtn').addEventListener('click', () => viewer.duplicate(viewer.selected));
+$('#dupBtn').addEventListener('click', () => viewer.duplicateSelected());
 
 // ---- Undo / redo ------------------------------------------------------------------------------
 
@@ -176,7 +179,7 @@ viewer.addEventListener('history', () => {
   $('#undoBtn').disabled = !viewer.canUndo;
   $('#redoBtn').disabled = !viewer.canRedo;
 });
-$('#delBtn').addEventListener('click', () => viewer.remove(viewer.selected));
+$('#delBtn').addEventListener('click', () => viewer.removeSelected());
 
 function numberField(label, value, onCommit, { unit = 'mm', step = 1, min, disabled = false, digits = 1 } = {}) {
   const wrap = el('label', { class: `field ${disabled ? 'disabled' : ''}` });
@@ -205,19 +208,48 @@ function button(label, onClick, cls = '') {
 
 let uniformScale = true;
 
+// Several models selected (Ctrl + click, Ctrl + A): one panel of actions for all of them.
+function renderGroupPanel(p) {
+  const list = viewer.selectedList;
+  const title = el('div', { class: 'tp-title' });
+  title.innerHTML = `<strong>${list.length} models selected</strong>`;
+  p.append(title);
+  p.append(el('p', { class: 'note' }, 'Drag any of them to move them all. Arrow keys nudge them all. Ctrl + click a model to add or remove it.'));
+  const each = (label, fn) => () => viewer.forSelected(label, fn);
+  const spin = el('div', { class: 'rot-row' });
+  spin.append(el('span', {}, 'Spin each'), el('span', { class: 'axis-tag' }, 'Z'),
+    button('↺ 90°', each('turn', (m) => viewer.rotate(m, 'z', 90))),
+    button('↻ 90°', each('turn', (m) => viewer.rotate(m, 'z', -90))));
+  p.append(spin);
+  p.append(button('⬇ Lay each one flat', each('lay flat', (m) => viewer.layFlatAuto(m)), 'wide'));
+  const scale = el('div', { class: 'btn-row' });
+  for (const pct of [50, 100, 200]) {
+    scale.append(button(`${pct}%`, each('scale', (m) => viewer.setScale(m, pct, pct, pct))));
+  }
+  scale.append(button('Fit bed', each('fit to bed', (m) => viewer.scaleToFit(m))));
+  p.append(el('span', { class: 'sub-label' }, 'Scale each (from its file size)'), scale);
+  p.append(button('⊕ Center the group on the bed', () => viewer.centerSelected(), 'wide'));
+  p.append(button('▦ Arrange everything', () => viewer.arrangeAll(), 'wide'));
+}
+
 function renderTools() {
   const m = viewer.selected;
+  const count = viewer.selection.size;
   for (const b of document.querySelectorAll('.tool[data-tool]')) {
-    b.classList.toggle('on', b.dataset.tool === tool && !!m);
-    b.disabled = !m;
+    b.classList.toggle('on', b.dataset.tool === tool && count === 1);
+    b.disabled = count !== 1;
   }
-  $('#dupBtn').disabled = !m;
-  $('#delBtn').disabled = !m;
+  $('#dupBtn').disabled = !count;
+  $('#delBtn').disabled = !count;
 
   const p = $('#toolPanel');
-  p.hidden = !m;
-  if (!m) return;
+  p.hidden = !count;
+  if (!count) return;
   p.innerHTML = '';
+  if (count > 1 || !m) {
+    renderGroupPanel(p);
+    return;
+  }
   const title = el('div', { class: 'tp-title' });
   title.innerHTML = `<strong>${esc({ move: 'Move', scale: 'Scale', rotate: 'Rotate', mirror: 'Mirror' }[tool])}</strong><span class="tp-model">${esc(m.name)}</span>`;
   p.append(title);
@@ -286,7 +318,7 @@ function renderTools() {
     const pick = button(viewer.layFlatPicking ? '✋ Click a face on your model…' : '🖐 Lay flat: pick a face', () => viewer.startLayFlatPick(!viewer.layFlatPicking), `wide ${viewer.layFlatPicking ? 'primary' : ''}`);
     p.append(pick);
     p.append(button('⬇ Biggest flat side down', () => viewer.layFlatAuto(m), 'wide'));
-    p.append(el('p', { class: 'note' }, 'Lay flat: click the side of your model that should touch the bed.'));
+    p.append(el('p', { class: 'note' }, 'Lay flat: click the side of your model that should touch the bed. Or drag a coloured ring round the model to turn it (15° steps).'));
     p.append(button('↺ Undo all turns and mirrors', () => viewer.resetTurns(m), 'linkbtn'));
   }
 
@@ -335,10 +367,10 @@ function renderObjects() {
   list.innerHTML = '';
   for (const m of viewer.models) {
     const s = m.size;
-    const li = el('li', { class: `${m === viewer.selected ? 'on' : ''} ${m.outside ? 'bad' : ''}` });
-    const b = el('button', { type: 'button', title: m.outside ? `This model is ${m.fitProblem}.` : m.name });
+    const li = el('li', { class: `${viewer.selection.has(m) ? 'on' : ''} ${m.outside ? 'bad' : ''}` });
+    const b = el('button', { type: 'button', title: m.outside ? `This model is ${m.fitProblem}.` : `${m.name} (Ctrl + click to pick several)` });
     b.innerHTML = `<span class="obj-name">${m.outside ? '⚠ ' : ''}${esc(m.name)}</span><span class="obj-size">${fmt(s.x)} × ${fmt(s.y)} × ${fmt(s.z)} mm</span>`;
-    b.addEventListener('click', () => viewer.select(m));
+    b.addEventListener('click', (e) => (e.ctrlKey || e.metaKey ? viewer.toggleSelect(m) : viewer.select(m)));
     li.append(b);
     list.append(li);
   }
@@ -555,6 +587,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (typing || document.querySelector('dialog[open]')) return;
   const m = viewer.selected;
+  const any = viewer.selection.size > 0;
   const key = e.key.toLowerCase();
   if (ctrl && key === 'z' && !e.shiftKey) {
     e.preventDefault();
@@ -564,23 +597,26 @@ window.addEventListener('keydown', (e) => {
     redo();
   } else if (ctrl && key === 'd') {
     e.preventDefault();
-    viewer.duplicate(m);
+    viewer.duplicateSelected();
+  } else if (ctrl && key === 'a') {
+    e.preventDefault();
+    viewer.selectAll();
   } else if (ctrl && e.key.toLowerCase() === 'r') {
     e.preventDefault();
     viewer.arrangeAll();
   } else if (ctrl) {
     return;
   } else if (e.key === 'Delete' || e.key === 'Backspace') {
-    viewer.remove(m);
+    viewer.removeSelected();
   } else if (e.key === 'Escape') {
     if (viewer.layFlatPicking) viewer.startLayFlatPick(false);
     else viewer.select(null);
-  } else if (e.key.startsWith('Arrow') && m) {
+  } else if (e.key.startsWith('Arrow') && any) {
     // Nudge like Cura: 1 mm, or 10 mm with Shift. Up is toward the back of the bed.
     e.preventDefault();
     const step = e.shiftKey ? 10 : 1;
     const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key];
-    viewer.nudge(m, d[0], d[1]);
+    viewer.forSelected('move', (sel) => viewer.nudge(sel, d[0], d[1]));
     syncToolPanel();
   } else if (e.key === 't' || e.key === 'T') setTool('move');
   else if (e.key === 's' || e.key === 'S') setTool('scale');
@@ -595,4 +631,5 @@ new ResizeObserver(() => {
 }).observe($('#action'));
 
 plateChanged();
+viewer.setGizmo(tool === 'rotate' ? 'rotate' : null);
 renderTools();

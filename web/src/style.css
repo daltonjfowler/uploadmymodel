@@ -123,6 +123,10 @@ button.linkbtn:hover:not(:disabled) { color: var(--accent); background: none; }
   border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 4px;
 }
 .note { margin: 0; color: var(--muted); font-size: .82rem; }
+.angle-label {
+  position: absolute; z-index: 6; pointer-events: none; padding: 3px 8px; border-radius: 6px;
+  background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); font-weight: 700; font-variant-numeric: tabular-nums;
+}
 
 /* Empty state */
 .empty { position: absolute; inset: 0; display: grid; place-items: center; z-index: 2; pointer-events: none; }

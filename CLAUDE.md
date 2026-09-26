@@ -9,8 +9,10 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   pattern, walls, tree supports, adhesion) plus the class defaults and the greyed-out locked rows.
   Imported by the page and by the Worker, which refuses anything not on the lists.
 - `web/`: the student page, built by Vite into `public/` (gitignored). No framework; three.js for 3D.
-  - `src/viewer.js`: the bed, models, camera, drag, rotate / lay flat / mirror / scale, overhang
-    shading, and `exportPlateSTL()` (printer coordinates, front-left corner = 0,0).
+  - `src/viewer.js`: the bed, models, camera, drag, rotate / lay flat / mirror / scale, rotate
+    rings (15° snap), multi-select (Ctrl + click, Ctrl + A), undo history, overhang shading, and
+    `exportPlateSTL()` (printer coordinates, front-left corner = 0,0). With `?debug` in the address,
+    `window.umm = { viewer, panel }` for browser tests.
   - `src/settings-panel.js`: Recommended / Custom settings card and hover help.
   - `src/main.js`: tools, object list, Slice / result card, keyboard, drag and drop.
   - `src/loaders.js`: STL / OBJ / 3MF → triangle soup, and the sample model.

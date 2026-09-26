@@ -115,7 +115,9 @@ export class Viewer extends EventTarget {
     this.host = host;
     this.printer = printer;
     this.models = [];
-    this.selected = null;
+    this.selected = null; // the model the tool panel shows (the last one clicked)
+    this.selection = new Set(); // every selected model; Ctrl + click adds more
+    this.gizmo = null; // 'rotate' shows the rotate rings
     this.undoStack = [];
     this.redoStack = [];
     this.pending = null;
@@ -143,9 +145,14 @@ export class Viewer extends EventTarget {
 
     this.buildBed();
 
-    this.selectionBox = new THREE.Box3Helper(new THREE.Box3(), 0x2f81f7);
-    this.selectionBox.visible = false;
-    this.scene.add(this.selectionBox);
+    this.selectionBoxes = [];
+    this.buildRings();
+
+    // "45°" next to the cursor while a rotate ring is dragged.
+    this.angleLabel = document.createElement('div');
+    this.angleLabel.className = 'angle-label';
+    this.angleLabel.hidden = true;
+    host.appendChild(this.angleLabel);
 
     // Our pointer handler goes on before OrbitControls', so grabbing a model can stop the camera
     // from turning at the same time.
@@ -167,6 +174,133 @@ export class Viewer extends EventTarget {
     this.setView('home', false);
     new ResizeObserver(() => this.resize()).observe(host);
     this.resize();
+  }
+
+  // ---- Rotate rings (Cura's rotate tool) ------------------------------------------------------
+  // Three rings round the selected model: red turns about X, green about Y, blue about Z. Each has a
+  // thin visible ring and a fat invisible one that is easy to grab. Turns snap to 15°, like Cura.
+
+  buildRings() {
+    this.rings = new THREE.Group();
+    this.rings.visible = false;
+    this.ringParts = {};
+    const make = (axis, color) => {
+      const group = new THREE.Group();
+      const vis = new THREE.Mesh(
+        new THREE.TorusGeometry(1, 0.024, 8, 128),
+        new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 }),
+      );
+      vis.renderOrder = 10;
+      const hit = new THREE.Mesh(new THREE.TorusGeometry(1, 0.075, 6, 64), new THREE.MeshBasicMaterial({ visible: false }));
+      hit.userData.axis = axis;
+      group.add(vis, hit);
+      if (axis === 'x') group.rotation.y = Math.PI / 2;
+      else if (axis === 'y') group.rotation.x = Math.PI / 2;
+      this.rings.add(group);
+      this.ringParts[axis] = { vis, hit, color };
+    };
+    make('x', 0xe5484d);
+    make('y', 0x30a46c);
+    make('z', 0x3e63dd);
+    this.scene.add(this.rings);
+  }
+
+  setGizmo(name) {
+    this.gizmo = name;
+    this.updateRings();
+    this.requestRender();
+  }
+
+  updateRings() {
+    const m = this.selection.size === 1 ? this.selected : null;
+    const show = this.gizmo === 'rotate' && !!m && !this.ringDrag;
+    this.rings.visible = show || !!this.ringDrag;
+    if (!m || this.ringDrag) return;
+    const s = m.size;
+    this.rings.position.set(m.position.x, m.position.y, s.z / 2);
+    this.rings.scale.setScalar(Math.max(s.x, s.y, s.z) * 0.62 + 6);
+  }
+
+  hitRing(e) {
+    if (!this.rings.visible) return null;
+    this.setRay(e);
+    const hits = this.raycaster.intersectObjects(Object.values(this.ringParts).map((p) => p.hit), false);
+    return hits[0]?.object.userData.axis ?? null;
+  }
+
+  // Angle of the pointer round the ring's axis, in the ring's plane (radians, right-handed).
+  ringAngle(e) {
+    const d = this.ringDrag;
+    this.setRay(e);
+    const p = this.raycaster.ray.intersectPlane(d.plane, new THREE.Vector3());
+    if (!p) return null;
+    const v = p.sub(d.center);
+    return Math.atan2(v.dot(d.w), v.dot(d.u));
+  }
+
+  startRingDrag(e, axis) {
+    const m = this.selected;
+    const n = new THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0);
+    const basis = { x: [[0, 1, 0], [0, 0, 1]], y: [[0, 0, 1], [1, 0, 0]], z: [[1, 0, 0], [0, 1, 0]] }[axis];
+    const center = this.rings.position.clone();
+    this.ringDrag = {
+      model: m,
+      axis,
+      n,
+      center,
+      u: new THREE.Vector3(...basis[0]),
+      w: new THREE.Vector3(...basis[1]),
+      plane: new THREE.Plane().setFromNormalAndCoplanarPoint(n, center),
+      startPos: m.position.clone(),
+      total: 0,
+      snapped: 0,
+    };
+    const a = this.ringAngle(e);
+    if (a === null) {
+      this.ringDrag = null;
+      return false;
+    }
+    this.ringDrag.last = a;
+    for (const [k, part] of Object.entries(this.ringParts)) part.vis.material.opacity = k === axis ? 1 : 0.25;
+    return true;
+  }
+
+  moveRingDrag(e) {
+    const d = this.ringDrag;
+    const a = this.ringAngle(e);
+    if (a === null) return;
+    let delta = a - d.last;
+    if (delta > Math.PI) delta -= 2 * Math.PI;
+    if (delta < -Math.PI) delta += 2 * Math.PI;
+    d.last = a;
+    d.total += delta;
+    const deg = Math.round(THREE.MathUtils.radToDeg(d.total) / 15) * 15;
+    if (deg !== d.snapped) {
+      d.snapped = deg;
+      // Preview: turn the mesh about the model's middle. On release the turn is baked for real.
+      const m = d.model;
+      const q = new THREE.Quaternion().setFromAxisAngle(d.n, THREE.MathUtils.degToRad(deg));
+      const c = new THREE.Vector3(0, 0, m.size.z / 2);
+      m.mesh.quaternion.copy(q);
+      m.mesh.position.copy(d.startPos).add(c).sub(c.clone().applyQuaternion(q));
+      this.requestRender();
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    this.angleLabel.textContent = `${deg}°`;
+    this.angleLabel.style.left = `${e.clientX - rect.left + 16}px`;
+    this.angleLabel.style.top = `${e.clientY - rect.top - 10}px`;
+    this.angleLabel.hidden = false;
+  }
+
+  endRingDrag() {
+    const d = this.ringDrag;
+    this.ringDrag = null;
+    this.angleLabel.hidden = true;
+    for (const part of Object.values(this.ringParts)) part.vis.material.opacity = 0.95;
+    d.model.mesh.quaternion.identity();
+    d.model.mesh.position.copy(d.startPos);
+    if (d.snapped % 360 !== 0) this.rotate(d.model, d.axis, d.snapped);
+    else this.changed();
   }
 
   // ---- Scene: bed, grid, build volume -------------------------------------------------------
@@ -322,6 +456,7 @@ export class Viewer extends EventTarget {
   changed() {
     for (const m of this.models) this.checkFit(m);
     this.updateSelectionBox();
+    this.updateRings();
     this.requestRender();
     this.emit('change');
   }
@@ -401,7 +536,10 @@ export class Viewer extends EventTarget {
     if (index < 0) return -1;
     this.scene.remove(model.mesh);
     this.models.splice(index, 1);
-    if (this.selected === model) this.select(null);
+    if (this.selection.has(model)) {
+      this.selection.delete(model);
+      this.selectMany([...this.selection], [...this.selection].pop() ?? null);
+    }
     return index;
   }
 
@@ -444,31 +582,96 @@ export class Viewer extends EventTarget {
   }
 
   select(model) {
-    this.selected = model ?? null;
+    this.selectMany(model ? [model] : [], model ?? null);
+  }
+
+  /** Ctrl + click: add a model to the selection, or take it out. */
+  toggleSelect(model) {
+    const next = new Set(this.selection);
+    if (next.has(model)) next.delete(model);
+    else next.add(model);
+    const list = [...next];
+    this.selectMany(list, next.has(model) ? model : (list.at(-1) ?? null));
+  }
+
+  selectAll() {
+    this.selectMany(this.models, this.models.at(-1) ?? null);
+  }
+
+  selectMany(models, primary) {
+    this.selection = new Set(models);
+    this.selected = primary && this.selection.has(primary) ? primary : null;
     for (const m of this.models) this.tint(m);
     this.updateSelectionBox();
+    this.updateRings();
     this.requestRender();
     this.emit('select', this.selected);
+  }
+
+  /** Selected models in plate order. */
+  get selectedList() {
+    return this.models.filter((m) => this.selection.has(m));
   }
 
   tint(model) {
     const mat = model.material;
     mat.color.copy(model.outside ? OUTSIDE_TINT : new THREE.Color(1, 1, 1));
-    mat.emissive.set(model === this.selected ? 0x2a1405 : 0x000000);
+    mat.emissive.set(this.selection.has(model) ? 0x2a1405 : 0x000000);
   }
 
+  // One blue box per selected model (red if it does not fit).
   updateSelectionBox() {
-    const m = this.selected;
-    if (!m) {
-      this.selectionBox.visible = false;
-      return;
+    const list = this.selectedList;
+    while (this.selectionBoxes.length < list.length) {
+      const b = new THREE.Box3Helper(new THREE.Box3(), 0x2f81f7);
+      this.scene.add(b);
+      this.selectionBoxes.push(b);
     }
-    const s = m.size;
-    const p = m.position;
-    this.selectionBox.box.min.set(p.x - s.x / 2, p.y - s.y / 2, 0);
-    this.selectionBox.box.max.set(p.x + s.x / 2, p.y + s.y / 2, s.z);
-    this.selectionBox.material.color.set(m.outside ? 0xe5484d : 0x2f81f7);
-    this.selectionBox.visible = true;
+    this.selectionBoxes.forEach((box, i) => {
+      const m = list[i];
+      box.visible = !!m;
+      if (!m) return;
+      const s = m.size;
+      const p = m.position;
+      box.box.min.set(p.x - s.x / 2, p.y - s.y / 2, 0);
+      box.box.max.set(p.x + s.x / 2, p.y + s.y / 2, s.z);
+      box.material.color.set(m.outside ? 0xe5484d : 0x2f81f7);
+    });
+  }
+
+  // ---- Actions on every selected model (one Undo step each) ---------------------------------
+
+  forSelected(label, fn) {
+    const list = this.selectedList;
+    if (!list.length) return;
+    this.transaction(label, () => list.forEach(fn));
+  }
+
+  /** Slide every selected model together so the group's middle is the bed's middle. */
+  centerSelected() {
+    const list = this.selectedList;
+    if (!list.length) return;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const m of list) {
+      const s = m.size;
+      minX = Math.min(minX, m.position.x - s.x / 2);
+      maxX = Math.max(maxX, m.position.x + s.x / 2);
+      minY = Math.min(minY, m.position.y - s.y / 2);
+      maxY = Math.max(maxY, m.position.y + s.y / 2);
+    }
+    const dx = -(minX + maxX) / 2;
+    const dy = -(minY + maxY) / 2;
+    this.forSelected('center', (m) => this.setPosition(m, Math.round((m.position.x + dx) * 10) / 10, Math.round((m.position.y + dy) * 10) / 10));
+  }
+
+  removeSelected() {
+    this.forSelected('delete', (m) => this.remove(m));
+  }
+
+  duplicateSelected() {
+    const copies = [];
+    this.forSelected('copy', (m) => copies.push(this.duplicate(m)));
+    if (copies.length > 1) this.selectMany(copies, copies.at(-1));
   }
 
   // Paint faces that will need support red. Runs after any turn, mirror or scale.
@@ -729,12 +932,18 @@ export class Viewer extends EventTarget {
   }
 
   frameSelection() {
-    const m = this.selected;
-    if (!m) return this.setView('home');
-    const s = m.size;
-    const r = Math.max(s.x, s.y, s.z, 20);
+    const list = this.selectedList;
+    if (!list.length) return this.setView('home');
+    const box = new THREE.Box3();
+    for (const m of list) {
+      const s = m.size;
+      box.expandByPoint(new THREE.Vector3(m.position.x - s.x / 2, m.position.y - s.y / 2, 0));
+      box.expandByPoint(new THREE.Vector3(m.position.x + s.x / 2, m.position.y + s.y / 2, s.z));
+    }
+    const size = box.getSize(new THREE.Vector3());
+    const r = Math.max(size.x, size.y, size.z, 20);
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();
-    const target = new THREE.Vector3(m.position.x, m.position.y, s.z / 2);
+    const target = box.getCenter(new THREE.Vector3());
     this.camera.position.copy(target.clone().addScaledVector(dir, r * 3.2));
     this.controls.target.copy(target);
     this.controls.update();
@@ -743,10 +952,17 @@ export class Viewer extends EventTarget {
 
   // ---- Pointer ------------------------------------------------------------------------------
 
-  pick(e) {
+  setRay(e) {
+    // Positions may have changed since the last frame (Undo, typing a number); picking must use
+    // where the models are now, not where they were last drawn.
+    this.scene.updateMatrixWorld();
     const rect = this.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
+  }
+
+  pick(e) {
+    this.setRay(e);
     const hit = this.raycaster.intersectObjects(this.models.map((m) => m.mesh), false)[0];
     return hit ? { model: hit.object.userData.model, point: hit.point, face: hit.face } : null;
   }
@@ -761,8 +977,25 @@ export class Viewer extends EventTarget {
 
   onPointerDown(e) {
     this.down = { x: e.clientX, y: e.clientY };
-    if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey) return; // those pan the camera
+    if (e.button !== 0 || e.shiftKey) return; // right-drag and Shift + drag pan the camera
+    if (!this.layFlatPicking && !(e.ctrlKey || e.metaKey)) {
+      const axis = this.hitRing(e);
+      if (axis && this.startRingDrag(e, axis)) {
+        e.stopImmediatePropagation();
+        this.down = null;
+        this.canvas.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
     const hit = this.pick(e);
+    if ((e.ctrlKey || e.metaKey) && !this.layFlatPicking) {
+      // Ctrl + click on a model adds it to the selection; Ctrl + drag on empty space pans.
+      if (!hit) return;
+      e.stopImmediatePropagation();
+      this.down = null;
+      this.toggleSelect(hit.model);
+      return;
+    }
     if (this.layFlatPicking) {
       e.stopImmediatePropagation();
       this.down = null; // the model turns away from the cursor; this click must not deselect it
@@ -776,14 +1009,16 @@ export class Viewer extends EventTarget {
     }
     if (!hit) return;
     e.stopImmediatePropagation();
-    this.select(hit.model);
+    // Grabbing one of several selected models drags them all.
+    if (this.selection.has(hit.model)) this.selectMany([...this.selection], hit.model);
+    else this.select(hit.model);
     const ground = this.groundPoint(e, hit.point.z);
     if (!ground) return;
     this.drag = {
       model: hit.model,
-      start: hit.model.position.clone(),
+      models: this.selectedList.map((m) => ({ m, start: m.position.clone() })),
+      ground,
       z: hit.point.z,
-      offset: new THREE.Vector2(hit.model.position.x - ground.x, hit.model.position.y - ground.y),
       moved: false,
     };
     this.canvas.setPointerCapture(e.pointerId);
@@ -791,18 +1026,25 @@ export class Viewer extends EventTarget {
   }
 
   onPointerMove(e) {
+    if (this.ringDrag) {
+      this.moveRingDrag(e);
+      return;
+    }
     if (this.drag) {
       const g = this.groundPoint(e, this.drag.z);
       if (!g) return;
       // Allowed off the bed (it turns grey), but not so far it gets lost.
       const reach = this.printer.bed.x / 2 + 80;
       const clamp = (v) => Math.max(-reach, Math.min(reach, Math.round(v * 10) / 10));
-      const x = clamp(g.x + this.drag.offset.x);
-      const y = clamp(g.y + this.drag.offset.y);
-      this.drag.model.position.set(x, y, 0);
+      const dx = g.x - this.drag.ground.x;
+      const dy = g.y - this.drag.ground.y;
+      for (const { m, start } of this.drag.models) {
+        m.position.set(clamp(start.x + dx), clamp(start.y + dy), 0);
+        this.checkFit(m);
+      }
       this.drag.moved = true;
-      this.checkFit(this.drag.model);
       this.updateSelectionBox();
+      this.updateRings();
       this.requestRender();
       this.emit('dragging', this.drag.model);
       return;
@@ -812,25 +1054,36 @@ export class Viewer extends EventTarget {
     const now = performance.now();
     if (now - (this.lastHover ?? 0) < 80) return;
     this.lastHover = now;
-    this.canvas.style.cursor = this.pick(e) ? 'grab' : '';
+    const ring = this.hitRing(e);
+    this.canvas.style.cursor = ring ? 'alias' : this.pick(e) ? 'grab' : '';
   }
 
   onPointerUp(e) {
+    if (this.ringDrag) {
+      if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
+      this.endRingDrag();
+      return;
+    }
     if (this.drag) {
-      const { moved, model, start } = this.drag;
+      const { moved, models } = this.drag;
       this.drag = null;
       this.canvas.style.cursor = 'grab';
       if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
       if (moved) {
-        // One Undo step for the whole drag.
-        const { x, y } = model.position;
-        model.position.copy(start);
-        this.setPosition(model, x, y);
+        // One Undo step for the whole drag, however many models moved.
+        this.transaction('move', () => {
+          for (const { m, start } of models) {
+            const { x, y } = m.position;
+            m.position.copy(start);
+            this.setPosition(m, x, y);
+          }
+        });
       }
       return;
     }
-    // A click (not a camera drag) on empty space clears the selection.
-    if (this.down && e.button === 0 && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) < 5) {
+    // A plain click (not a camera drag, not Ctrl/Shift) on empty space clears the selection.
+    const plain = !(e.ctrlKey || e.metaKey || e.shiftKey);
+    if (plain && this.down && e.button === 0 && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) < 5) {
       if (!this.pick(e)) this.select(null);
     }
     this.down = null;
