@@ -7,7 +7,7 @@ import {
   CLASS_DEFAULTS, INFILL_PATTERNS, PRINTER, SETTINGS, TREE_SUPPORT_INFILL, applyClassLocks, checkAgainstClass, lockedRows,
   SIMPLE_QUALITIES, gcodeFileName, safeNamePart, summarize, toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
-import { generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
+import { MAX_PHRASE, MIN_PHRASE, PHRASE_COUNT, PHRASE_WORDS, generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
 import { checkPlateSTL } from '../src/worker.js';
 
 test('class defaults: the school profile current_lulzbot_9_18, but Standard layers (0.25 mm)', () => {
@@ -86,10 +86,38 @@ test('G-code file names: the student own name, or name-model', () => {
 test('class phrases: forgiving to type, strict to check', () => {
   assert.equal(normalizePhrase('  Orange Walrus__TACO '), 'orange-walrus-taco');
   assert.equal(normalizePhrase('orange--walrus-taco!'), 'orange-walrus-taco');
-  assert.match(generatePhrase(), /^[a-z]+-[a-z]+-[a-z]+$/);
-  assert.deepEqual(validateOpenRequest({ minutes: 50, phrase: 'Blue Robot' }), { ok: true, phrase: 'blue-robot', minutes: 50 });
-  for (const bad of [{ minutes: 51, phrase: 'blue-robot' }, { minutes: 50, phrase: 'ab' }, { minutes: 50, phrase: 'x'.repeat(41) }, null]) {
+  assert.equal(normalizePhrase('Golden Walrus Lantern 42'), 'golden-walrus-lantern-42');
+  assert.match(generatePhrase(), /^[a-z]+-[a-z]+-[a-z]+-[1-9][0-9]$/);
+  assert.deepEqual(validateOpenRequest({ minutes: 50, phrase: 'Blue Robot Pancake' }), { ok: true, phrase: 'blue-robot-pancake', minutes: 50 });
+  for (const bad of [{ minutes: 51, phrase: 'blue-robot-pancake' }, { minutes: 50, phrase: 'ab' }, { minutes: 50, phrase: 'x'.repeat(41) }, null]) {
     assert.equal(validateOpenRequest(bad).ok, false, JSON.stringify(bad));
+  }
+});
+
+test("class phrases: a teacher's own must be 12 characters or more", () => {
+  assert.equal(MIN_PHRASE, 12);
+  assert.equal(validateOpenRequest({ minutes: 50, phrase: 'blue-robot' }).ok, false); // 10
+  assert.equal(validateOpenRequest({ minutes: 50, phrase: 'blue robot!!' }).ok, false); // 10 once cleaned up
+  assert.equal(validateOpenRequest({ minutes: 50, phrase: 'blue-robot-7' }).ok, true); // 12
+});
+
+test('suggested phrases: too many to guess, easy to type', () => {
+  // 60 guesses a minute per address (SLICE_RATE_IP) against at least 2^28 phrases.
+  assert.ok(PHRASE_COUNT >= 2 ** 28, `only ${PHRASE_COUNT} phrases`);
+  const words = PHRASE_WORDS.flat();
+  assert.deepEqual(words.filter((w, i) => words.indexOf(w) !== i), [], 'no word twice');
+  for (const w of words) assert.match(w, /^[a-z]{3,11}$/, w);
+  // Every phrase the button can make is one the teacher could also type in, and fits the box.
+  const longest = PHRASE_WORDS.map((list) => Math.max(...list.map((w) => w.length))).reduce((a, b) => a + b) + 3 + 2;
+  const shortest = PHRASE_WORDS.map((list) => Math.min(...list.map((w) => w.length))).reduce((a, b) => a + b) + 3 + 2;
+  assert.ok(longest <= MAX_PHRASE && shortest >= MIN_PHRASE, `${shortest}..${longest}`);
+  // The ends of each list and the number range are reachable.
+  assert.equal(generatePhrase(() => 0), `${PHRASE_WORDS.map((l) => l[0]).join('-')}-10`);
+  assert.equal(generatePhrase(() => 0.999999), `${PHRASE_WORDS.map((l) => l.at(-1)).join('-')}-99`);
+  for (let i = 0; i < 200; i++) assert.equal(validateOpenRequest({ minutes: 50, phrase: generatePhrase() }).ok, true);
+  // Some words that must never be in a list (names, double meanings, tricky spellings).
+  for (const w of ['taco', 'banana', 'pickle', 'muffin', 'amber', 'violet', 'rusty', 'raven', 'desert', 'arctic', 'leopard', 'grey', 'gray']) {
+    assert.equal(words.includes(w), false, w);
   }
 });
 

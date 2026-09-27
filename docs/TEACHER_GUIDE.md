@@ -31,8 +31,9 @@ What works today (2026-09-26) and how to run it. Student steps are in
 
 ## Opening slicing for a class
 
-On the teacher page, **Slicing for this class**: keep the suggested phrase (or type your own),
-choose how long, press **Open slicing**, and put the big phrase on the board. Students type it the
+On the teacher page, **Slicing for this class**: keep the suggested phrase (three words and a
+number, like `golden-walrus-lantern-42`) or type your own of at least 12 letters or numbers, choose
+how long, press **Open slicing**, and put the big phrase on the board. Students type it the
 first time they press Slice. Everything else on the site works without it. **Close now** ends it
 early; otherwise it closes by itself. While it is closed nobody can wake the slicer, so there is
 nothing to pay for.

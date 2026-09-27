@@ -1,9 +1,12 @@
 // The Worker's /api/slice with a fake slicer (fetch stubbed), so the server path is tested without
 // Docker: G-code passes through with the right file name and summary, the teacher's limits and
-// locks are enforced, and slicer trouble becomes a friendly refusal.
+// locks are enforced, slicer trouble becomes a friendly refusal, and the class gate and the
+// per-address limits hold.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { afterEach, test } from 'node:test';
-import worker from '../src/worker.js';
+import worker, { constantTimeEquals } from '../src/worker.js';
+import { LineError } from '../src/line.js';
 import { PRINTER } from '../shared/settings.js';
 
 const realFetch = globalThis.fetch;
@@ -31,7 +34,9 @@ function env({ config, slicer = 'http://slicer.test', slicing = OPEN } = {}) {
   };
 }
 
-function sliceRequest(settings = {}, name = 'Jordan', modelName = 'Rocket Ship', phrase = 'Orange Walrus  Taco') {
+const TICKET = 'abcdef12-3456-7890';
+
+function sliceRequest(settings = {}, name = 'Jordan', modelName = 'Rocket Ship', phrase = 'Orange Walrus  Taco', ticket = TICKET) {
   const form = new FormData();
   form.append('model', new Blob([plateSTL()]), 'plate.stl');
   form.append('settings', JSON.stringify(settings));
@@ -43,6 +48,8 @@ function sliceRequest(settings = {}, name = 'Jordan', modelName = 'Rocket Ship',
     headers: {
       'content-type': body.headers.get('content-type'), 'content-length': String(bytes.byteLength),
       ...(phrase ? { 'x-class-phrase': phrase } : {}),
+      ...(ticket ? { 'x-slice-ticket': ticket } : {}),
+      'cf-connecting-ip': '203.0.113.9',
     },
   }));
 }
@@ -176,4 +183,164 @@ test('without SLICER_URL the answer is still 501 (the live site today)', async (
   assert.equal(res.status, 501);
   assert.equal((await res.json()).error, 'engine_not_ready');
   assert.equal(calls.length, 0);
+});
+
+// ---- The class gate and the per-address limits -----------------------------------------------
+
+// A Cloudflare rate-limit binding stand-in: `limit` tries per key, then no.
+function limiter(limit) {
+  const counts = new Map();
+  const seen = [];
+  return {
+    seen,
+    limit: async ({ key }) => {
+      seen.push(key);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      return { success: counts.get(key) <= limit };
+    },
+  };
+}
+
+test('phrase compare: constant time, and still right', async () => {
+  assert.equal(await constantTimeEquals('orange-walrus-taco', 'orange-walrus-taco'), true);
+  assert.equal(await constantTimeEquals('orange-walrus-tacp', 'orange-walrus-taco'), false);
+  assert.equal(await constantTimeEquals('', 'orange-walrus-taco'), false);
+  assert.equal(await constantTimeEquals('orange-walrus-taco-and-more', 'orange-walrus-taco'), false);
+});
+
+test('every phrase try counts against the address BEFORE the phrase is checked', async () => {
+  const calls = fakeSlicer();
+  const perIp = limiter(2);
+  const e = { ...env(), SLICE_RATE_IP: perIp };
+  // Two wrong guesses are counted (and refused as wrong)...
+  for (const guess of ['purple-walrus-taco', 'green-walrus-taco']) {
+    const res = await worker.fetch(await sliceRequest({}, 'J', 'M', guess), e);
+    assert.equal((await res.json()).error, 'phrase');
+  }
+  // ...so the third try is refused without being compared at all, even the right phrase.
+  const res = await worker.fetch(await sliceRequest(), e);
+  assert.equal(res.status, 429);
+  assert.match((await res.json()).message, /A lot of slicing is coming from your school/);
+  assert.deepEqual(perIp.seen, ['ip 203.0.113.9', 'ip 203.0.113.9', 'ip 203.0.113.9']);
+  assert.equal(calls.length, 0);
+});
+
+test('made-up browser ids do not get round the per-address limit', async () => {
+  fakeSlicer();
+  const e = { ...env(), SLICE_RATE: limiter(6), SLICE_RATE_ALL: limiter(1000), SLICE_RATE_IP: limiter(3) };
+  const statuses = [];
+  for (let i = 0; i < 5; i++) {
+    const req = await sliceRequest();
+    req.headers.set('x-client-id', `made-up-id-${i}`);
+    statuses.push((await worker.fetch(req, e)).status);
+  }
+  assert.deepEqual(statuses, [200, 200, 200, 429, 429]);
+});
+
+test("the per-address slice limit is the site's limit, never tighter (a school shares one address)", () => {
+  const text = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
+  const limitOf = (name) => Number(new RegExp(`"name": "${name}".*?"limit": (\\d+), "period": 60`).exec(text)?.[1]);
+  assert.equal(limitOf('SLICE_RATE_ALL'), 60);
+  assert.equal(limitOf('SLICE_RATE_IP'), limitOf('SLICE_RATE_ALL'));
+  // The polled endpoints: a whole line (80 waiting + 2 slicing) asking every 2 s, and then some.
+  assert.ok(limitOf('API_RATE_IP') >= 82 * 30, 'API_RATE_IP covers a full line polling');
+  const ids = [...text.matchAll(/"namespace_id": "(\d+)"/g)].map((m) => m[1]);
+  assert.equal(new Set(ids).size, ids.length, 'rate-limit namespace ids are unique');
+  assert.match(text, /"compatibility_flags": \["enable_request_signal"\]/);
+});
+
+test('a page without a ticket (an old cached page) is told to reload', async () => {
+  const calls = fakeSlicer();
+  for (const ticket of [null, 'x']) {
+    const res = await worker.fetch(await sliceRequest({}, 'J', 'M', 'Orange Walrus Taco', ticket), env());
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.reload, true);
+    assert.equal(body.message, 'This page is out of date. Reload the page, then press Slice again.');
+  }
+  assert.equal(calls.length, 0);
+});
+
+test('slicing closed while the student waited in line says so', async () => {
+  const e = { ...env({ slicer: null }) };
+  e.slicerSend = async () => { await e.CLASS_KV.delete('slicing'); throw new LineError('left'); };
+  const res = await worker.fetch(await sliceRequest(), e);
+  assert.equal(res.status, 403);
+  assert.match((await res.json()).message, /Slicing closed while you were in line/);
+  const open = { ...env({ slicer: null }), slicerSend: async () => { throw new LineError('left'); } };
+  assert.equal((await worker.fetch(await sliceRequest(), open)).status, 409);
+});
+
+test("a plate that runs out the slicer's time gets advice, not a shrug", async () => {
+  globalThis.fetch = async () => new Response('{"error": "slicing took too long"}', { status: 500 });
+  const res = await worker.fetch(await sliceRequest(), env());
+  assert.equal(res.status, 502);
+  assert.match((await res.json()).message, /takes too long to slice. Try fewer models/);
+});
+
+function lineEnv(slicing = OPEN) {
+  const asked = [];
+  return {
+    asked,
+    env: {
+      ...env({ slicing }),
+      sliceLineStatus: async (t) => { asked.push(['status', t]); return { state: 'waiting', ahead: 0 }; },
+      sliceLineCancel: async (t) => { asked.push(['cancel', t]); },
+    },
+  };
+}
+const lineUrl = `https://uploadmymodel.com/api/slice/line?ticket=${TICKET}`;
+
+test('place in line: never reaches the line while slicing is closed', async () => {
+  const closed = lineEnv(null);
+  let res = await worker.fetch(new Request(lineUrl), closed.env);
+  assert.deepEqual(await res.json(), { state: 'none' });
+  res = await worker.fetch(new Request(lineUrl, { method: 'DELETE' }), closed.env);
+  assert.deepEqual(await res.json(), { state: 'none' });
+  assert.deepEqual(closed.asked, []);
+  const open = lineEnv();
+  res = await worker.fetch(new Request(lineUrl), open.env);
+  assert.equal((await res.json()).state, 'waiting');
+  await worker.fetch(new Request(lineUrl, { method: 'DELETE' }), open.env);
+  assert.deepEqual(open.asked, [['status', TICKET], ['cancel', TICKET]]);
+  // No ticket, no line.
+  res = await worker.fetch(new Request('https://uploadmymodel.com/api/slice/line'), open.env);
+  assert.equal(res.status, 400);
+  assert.equal(open.asked.length, 2);
+});
+
+test('the polled endpoints share one per-address limit; health does not', async () => {
+  const perIp = limiter(3);
+  const { env: e, asked } = lineEnv();
+  e.API_RATE_IP = perIp;
+  const get = (path) => worker.fetch(new Request(`https://uploadmymodel.com${path}`, { headers: { 'cf-connecting-ip': '198.51.100.7' } }), e);
+  assert.equal((await get('/api/class')).status, 200);
+  assert.equal((await get('/api/slicing')).status, 200);
+  assert.equal((await get(`/api/slice/line?ticket=${TICKET}`)).status, 200);
+  for (const path of ['/api/class', '/api/slicing', `/api/slice/line?ticket=${TICKET}`]) {
+    const res = await get(path);
+    assert.equal(res.status, 429, path);
+    assert.match((await res.json()).message, /Too many requests/);
+  }
+  assert.equal(asked.length, 1); // the refused line request never reached the line
+  assert.equal((await get('/api/health')).status, 200);
+  assert.deepEqual(new Set(perIp.seen), new Set(['ip 198.51.100.7']));
+});
+
+test('teacher: a short phrase is refused with a clear message; suggestions are long enough', async () => {
+  const e = { ...env(), TEACHER_KEY: 'test-teacher-key-123' };
+  const teacher = (method, body) => worker.fetch(new Request('https://uploadmymodel.com/api/teacher/slicing', {
+    method,
+    headers: { 'x-teacher-key': 'test-teacher-key-123', 'content-type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  }), e);
+  let res = await teacher('PUT', { phrase: 'blue robot', minutes: 50 });
+  assert.equal(res.status, 400);
+  assert.match((await res.json()).message, /needs 12 to 40 letters or numbers, so students cannot guess it\. Press "New phrase"/);
+  res = await teacher('GET');
+  const { suggestion } = await res.json();
+  assert.match(suggestion, /^[a-z]+-[a-z]+-[a-z]+-[1-9][0-9]$/);
+  res = await teacher('PUT', { phrase: suggestion, minutes: 50 });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).phrase, suggestion);
 });

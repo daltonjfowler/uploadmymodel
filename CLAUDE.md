@@ -49,7 +49,8 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   change the Worker and slicer in a compatible order (slicer first when it must accept new values).
 - `profiles/current_lulzbot_9_18.json`: the class profile, decoded from the school G-code footer.
 - `test/golden/*.gcode`: real G-code sliced by school Cura. Stored byte for byte (`-text`).
-- `test/*.test.mjs`: settings, server and G-code reader checks (`npm test`).
+- `test/*.test.mjs`: settings, server, line and G-code reader checks (`npm test`);
+  `python container/test_server.py`: the slicer's time budget.
 - `test/browser/`: ~100 browser checks with playwright-core + installed Chrome (`npm run dev`, then
   `npm run test:browser`; live: `UMM_TEACHER_KEY=<key> npm run test:browser -- https://uploadmymodel.com/`,
   never the key as an argument: npm echoes it).
@@ -67,6 +68,14 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
 - Slicing is gated by the teacher (shared/slicing.js): an open window + class phrase in KV
   ("slicing"), checked before the upload is read, and only when a slicer is connected. Everything
   else on the site works without it. Never let a request reach the slicer outside the window.
+- The phrase is guarded by numbers: suggested phrases are one of over 2^28 (`PHRASE_WORDS` x 90;
+  kid-safe words only, see the comment there), a teacher's own needs 12+ characters, the compare is
+  constant-time, and every /api/slice try counts against `SLICE_RATE_IP` BEFORE the compare. A
+  school shares ONE public address: per-address limits (`SLICE_RATE_IP`, `API_RATE_IP`) must never
+  be tighter than `SLICE_RATE_ALL` / what a full line polling every 2 s needs (Dalton's rule).
+- Every slice needs the page's ticket (`x-slice-ticket`). The line only gives a slicer to a page
+  that is still asking for its place, and frees a slot when the page stops asking or the browser
+  goes away (`request.signal`, `enable_request_signal`). `LEASE_MS` = `SLICE_BUDGET_S` + 30 s.
 - Locked-row temperatures follow the layer height's 4.13.2 quality file (`lockedRows()`).
 - Every plate change goes through a `Viewer` method that calls `record()` (or `transaction()` for
   several steps), so Undo works. Never move, scale or turn a model's mesh directly from `main.js`.

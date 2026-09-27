@@ -4,7 +4,7 @@
 // without Cloudflare-only modules.
 import { DurableObject } from 'cloudflare:workers';
 import { Container, getContainer } from '@cloudflare/containers';
-import { SliceLine, TICKET_PATTERN } from './line.js';
+import { SliceLine, sliceThroughLine } from './line.js';
 import worker from './worker.js';
 
 // How many slicer containers there are: container names slicer-0 .. slicer-<N-1>. Must be at most
@@ -35,8 +35,8 @@ export class SlicerLine extends DurableObject {
     this.line = new SliceLine(SLICERS);
   }
 
-  enter(ticket, polls) {
-    return this.line.enter(ticket, Date.now(), { polls });
+  enter(ticket) {
+    return this.line.enter(ticket, Date.now());
   }
 
   leave(ticket) {
@@ -49,14 +49,6 @@ export class SlicerLine extends DurableObject {
 
   status(ticket) {
     return this.line.status(ticket, Date.now());
-  }
-}
-
-/** Thrown by slicerSend; worker.js turns `code` into a message for the student. */
-class LineError extends Error {
-  constructor(code) {
-    super(code);
-    this.code = code;
   }
 }
 
@@ -74,7 +66,10 @@ export default {
       const line = () => env.SLICER_LINE.get(env.SLICER_LINE.idFromName('line'));
       env = {
         ...env,
-        slicerSend: (path, init, opts) => send(line, on, path, init, opts),
+        // The student's browser going away (request.signal) still gives the place in line back.
+        slicerSend: (path, init, opts) => sliceThroughLine(line, on, path, init, {
+          ...opts, signal: request.signal, waitUntil: (p) => ctx.waitUntil(p),
+        }),
         sliceLineStatus: (ticket) => line().status(ticket),
         sliceLineCancel: (ticket) => line().cancel(ticket),
         // The teacher closed slicing: put the slicers to sleep now instead of a minute from now,
@@ -92,40 +87,3 @@ export default {
     return worker.fetch(request, env, ctx);
   },
 };
-
-// A slice waits its turn in the line, goes to the slicer the line picked, and gives the turn back.
-// Anything else (the teacher's warm-up) goes to slicer-0.
-async function send(line, on, path, init, { ticket } = {}) {
-  if (path !== '/slice') return on(0, path, init);
-  // A ticket from the page means it will ask for its place; without one (a page from before the
-  // line), make one that is never dropped for not asking.
-  const polls = TICKET_PATTERN.test(ticket ?? '');
-  const t = polls ? ticket : crypto.randomUUID();
-  let slot;
-  try {
-    slot = await line().enter(t, polls);
-  } catch (err) {
-    if (String(err?.message).includes('full')) throw new LineError('full');
-    // The line itself failed (evicted, restarted): slice anyway on slicer-0, whose own lock still
-    // keeps order. Only the place-in-line display is lost.
-    console.error(JSON.stringify({ message: 'slicer line failed', error: String(err?.message ?? err) }));
-    return on(0, path, init);
-  }
-  if (slot < 0) throw new LineError('left');
-  try {
-    const res = await on(slot, path, init);
-    // A slicer that could not start (Cloudflare's instance cap reached, e.g. an old instance still
-    // shutting down): slice on slicer-0 instead, which queues it behind its current slice.
-    if (slot > 0 && res.status === 500) {
-      const detail = await res.clone().text().catch(() => '');
-      if (/Failed to start container/i.test(detail)) {
-        console.error(JSON.stringify({ message: 'slicer could not start, using slicer-0', slot, detail: detail.slice(0, 200) }));
-        return await on(0, path, init);
-      }
-    }
-    return res;
-  } finally {
-    // The container answers when the slice is done (it releases its lock before sending the file).
-    await line().leave(t).catch(() => {});
-  }
-}

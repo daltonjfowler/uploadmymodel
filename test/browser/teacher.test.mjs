@@ -63,7 +63,7 @@ const stl = (() => {
   return b;
 })();
 await openSlicing(page.request, base, key);
-const post = (settings) => page.request.post(base + 'api/slice', { headers: { 'x-class-phrase': TEST_PHRASE }, multipart: { model: { name: 'p.stl', mimeType: 'model/stl', buffer: stl }, settings: JSON.stringify(settings), name: 'x', modelName: 'y' } });
+const post = (settings) => page.request.post(base + 'api/slice', { headers: { 'x-class-phrase': TEST_PHRASE, 'x-slice-ticket': crypto.randomUUID() }, multipart: { model: { name: 'p.stl', mimeType: 'model/stl', buffer: stl }, settings: JSON.stringify(settings), name: 'x', modelName: 'y' } });
 const bad = await post({ walls: 2, infillDensity: 15 });
 check('server refuses unlocked change', [bad.status(), (await bad.json()).locked], [400, ['Wall count']]);
 const good = await post({ walls: 3, infillDensity: 15, quality: 'standard' });

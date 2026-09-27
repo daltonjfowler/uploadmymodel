@@ -11,7 +11,7 @@ GET /health -> {"ok": true, "engine": "<version line>"}
 
 One slice at a time (a lock): tree supports use one core and ~75 MB, and a queue is kinder to a
 small container than running several at once. Tree supports crash CuraEngine now and then
-(docs/ENGINE_OPTIONS.md), so a failed slice is retried.
+(docs/ENGINE_OPTIONS.md), so a failed slice is retried, all tries within SLICE_BUDGET_S.
 """
 import json
 import os
@@ -34,7 +34,12 @@ MAX_BODY = 45 * 1024 * 1024
 MAX_TRIANGLES = 800_000  # same as shared/settings.js LIMITS.maxTriangles
 BED_X, BED_Y = 280.0, 280.0
 ATTEMPTS = 3
-TIMEOUT_S = 240
+# All attempts of one slice together, so a slice holds the lock (and its place in the Worker's line)
+# for at most this long. A supported Benchy takes ~15 s live. src/line.js LEASE_MS is this + 30 s:
+# change both together.
+SLICE_BUDGET_S = 180
+MIN_ATTEMPT_S = 10  # less than this left: do not start another attempt
+clock = time.monotonic  # the tests replace it
 
 QUALITY = {"high detail": "high_detail", "standard": "standard", "high speed": "high_speed"}
 # Exactly the keys toCuraOverrides() sends, with the values each may take.
@@ -134,6 +139,7 @@ def mesh_file_name(name):
 
 
 def slice_plate(stl, quality, user, timings, model_name=None):
+    deadline = clock() + SLICE_BUDGET_S
     t = time.time()
     r = resolved(quality, user)
     timings["resolve"] = time.time() - t
@@ -145,9 +151,13 @@ def slice_plate(stl, quality, user, timings, model_name=None):
             f.write(stl)
         last = None
         for attempt in range(1, ATTEMPTS + 1):
+            left = deadline - clock()
+            if left < MIN_ATTEMPT_S:
+                print(json.dumps({"message": "no time left to retry", "attempt": attempt}), flush=True)
+                raise Refused(500, "slicing took too long")
             t = time.time()
             try:
-                res = run.slice_file(r, model, out, overrides, workdir=os.path.join(tmp, "flat"), timeout=TIMEOUT_S)
+                res = run.slice_file(r, model, out, overrides, workdir=os.path.join(tmp, "flat"), timeout=left)
             except subprocess.TimeoutExpired:
                 raise Refused(500, "slicing took too long")
             timings["engine"] = timings.get("engine", 0) + time.time() - t
@@ -196,9 +206,14 @@ class Handler(BaseHTTPRequestHandler):
             timings = {}
             stl = centred_stl(self.rfile.read(length))
             timings["model"] = time.time() - t0
-            with lock:
+            # Whoever holds the lock is done within SLICE_BUDGET_S, so waiting longer means trouble.
+            if not lock.acquire(timeout=SLICE_BUDGET_S):
+                raise Refused(503, "slicer busy")
+            try:
                 timings["queue"] = time.time() - t0 - timings["model"]
                 gcode, res, attempts = slice_plate(stl, quality, user, timings, self.headers.get("x-model-name"))
+            finally:
+                lock.release()
             header = res["header"] or ""
             time_s = re.search(r";TIME:(\d+)", header)
             metres = re.search(r";Filament used: ([0-9.]+)m", header)

@@ -38,7 +38,9 @@ answering 501.
   `x-engine-seconds`, `x-attempts`.
 
 One slice at a time. A failed engine run is retried up to 3 times (tree supports crash CuraEngine
-now and then, see `docs/ENGINE_OPTIONS.md`).
+now and then, see `docs/ENGINE_OPTIONS.md`), all tries within `SLICE_BUDGET_S` (180 s) together, so
+a slice never holds a slicer longer; `src/line.js` `LEASE_MS` is that plus 30 s.
+`python container/test_server.py` checks the budget without the engine or Docker.
 
 ## What was checked (Benchy, class settings)
 

@@ -3,6 +3,9 @@
   "name": "uploadmymodel",
   "main": "src/index.js",
   "compatibility_date": "2026-08-31",
+  // request.signal fires when a student's browser goes away mid-slice, so the Worker can still give
+  // the place in the slicer line back (src/line.js sliceThroughLine).
+  "compatibility_flags": ["enable_request_signal"],
   // uploadmymodel.com is the real address; www redirects to it (src/worker.js). The
   // workers.dev URL stays on as a fallback.
   "routes": [
@@ -43,10 +46,17 @@
     { "tag": "v1", "new_sqlite_classes": ["SlicerContainer"] },
     { "tag": "v2", "new_sqlite_classes": ["SlicerLine"] }
   ],
-  // Fair-use fuse for the slicer (src/worker.js slicerBudget): per browser, and for everyone.
+  // Fair-use fuses (src/worker.js). Namespace ids are unique across the whole Cloudflare account.
+  // SLICE_RATE / SLICE_RATE_ALL (slicerBudget): per browser, and for everyone.
+  // SLICE_RATE_IP: every /api/slice try per address, counted before the class phrase is checked, so
+  //   guessing it is slow. A school shares ONE address: never below SLICE_RATE_ALL (Dalton's rule).
+  // API_RATE_IP: /api/slicing, /api/class, /api/slice/line per address. 3000 covers a full line
+  //   polling every 2 s (82 pages x 30 a minute = 2460) plus page loads; see handleApi.
   "ratelimits": [
     { "name": "SLICE_RATE", "namespace_id": "20260926", "simple": { "limit": 6, "period": 60 } },
-    { "name": "SLICE_RATE_ALL", "namespace_id": "20260927", "simple": { "limit": 60, "period": 60 } }
+    { "name": "SLICE_RATE_ALL", "namespace_id": "20260927", "simple": { "limit": 60, "period": 60 } },
+    { "name": "SLICE_RATE_IP", "namespace_id": "20260950", "simple": { "limit": 60, "period": 60 } },
+    { "name": "API_RATE_IP", "namespace_id": "20260951", "simple": { "limit": 3000, "period": 60 } }
   ],
   // public/ is built from web/ by `npm run build` (npm run deploy does it first).
   "assets": {

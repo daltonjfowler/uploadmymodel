@@ -17,7 +17,7 @@ import {
   DEFAULT_CLASS_CONFIG, LIMITS, PRINTER, checkAgainstClass, formatMinutes, gcodeFileName, safeNamePart, summarize,
   toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
-import { generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
+import { MAX_PHRASE, MIN_PHRASE, generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
 import { TICKET_PATTERN } from './line.js';
 
 const KV_CLASS = 'class';
@@ -92,13 +92,33 @@ function refuse(status, message, extra = {}) {
 const encoder = new TextEncoder();
 
 // Secret comparison that leaks nothing through timing: both sides hashed to 32 bytes, then
-// Cloudflare's timingSafeEqual (same as uploadmylaser's src/constant-time.ts).
-async function constantTimeEquals(a, b) {
+// Cloudflare's timingSafeEqual (same as uploadmylaser's src/constant-time.ts). Node (the unit
+// tests) has no crypto.subtle.timingSafeEqual; the loop does the same, never stopping early.
+export async function constantTimeEquals(a, b) {
   const [left, right] = await Promise.all([
     crypto.subtle.digest('SHA-256', encoder.encode(a)),
     crypto.subtle.digest('SHA-256', encoder.encode(b)),
   ]);
-  return crypto.subtle.timingSafeEqual(left, right);
+  if (crypto.subtle.timingSafeEqual) return crypto.subtle.timingSafeEqual(left, right);
+  const x = new Uint8Array(left);
+  const y = new Uint8Array(right);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
+// Per-address fuses (Cloudflare rate-limit bindings, wrangler.jsonc). A whole school reaches us
+// from ONE public address, so these are only ever as tight as a whole class needs (Dalton's rule:
+// never tighter than SLICE_RATE_ALL, the limit for everyone). They stop one person at home from
+// guessing the class phrase or hammering the line and KV; the per-browser limit (slicerBudget)
+// keeps things fair inside school.
+function addressKey(request) {
+  return `ip ${request.headers.get('cf-connecting-ip') ?? 'unknown'}`;
+}
+
+async function overLimit(limiter, request) {
+  if (!limiter) return false;
+  return !(await limiter.limit({ key: addressKey(request) })).success;
 }
 
 // The saved class setup, or the open defaults if none is saved (or it no longer passes the
@@ -163,7 +183,14 @@ async function handleTeacher(request, env, url, ctx) {
       return json(400, { error: 'json', message: 'The page sent something the server could not read.' });
     }
     const v = validateOpenRequest(body);
-    if (!v.ok) return json(400, { error: 'invalid', message: 'Pick how long, and a phrase of 4 to 40 letters.', details: [v.error] });
+    if (!v.ok) {
+      return json(400, {
+        error: 'invalid',
+        message: `The class phrase needs ${MIN_PHRASE} to ${MAX_PHRASE} letters or numbers, so students cannot guess it. `
+          + 'Press "New phrase" for an easy one, or make yours longer.',
+        details: [v.error],
+      });
+    }
     if (!env.CLASS_KV) return json(503, { error: 'storage', message: 'Storage is not set up on this server.' });
     const until = Date.now() + v.minutes * 60_000;
     // KV forgets it by itself a minute after it runs out.
@@ -248,7 +275,9 @@ function slicerSender(env) {
 
 // Bill fuse for the slicer (Cloudflare rate-limit bindings, wrangler.jsonc): per browser, then for
 // everyone. Keyed by the page's x-client-id, not the IP: a school shares one public IP. Only
-// checked for requests that passed every other check, so mistakes never spend the budget.
+// checked for requests that passed every other check, so mistakes never spend the budget. The page
+// makes up its own id, so this is only fairness between students: SLICE_RATE_IP (handleSlice) is
+// the limit a made-up id cannot get round.
 async function slicerBudget(request, env) {
   const id = request.headers.get('x-client-id') ?? '';
   const key = /^[A-Za-z0-9-]{8,64}$/.test(id) ? `client ${id}` : `ip ${request.headers.get('cf-connecting-ip') ?? ''}`;
@@ -272,11 +301,21 @@ async function handleSlice(request, env) {
   // The class gate, only when a slicer is connected (without one there is nothing to open). It
   // comes before reading the upload, so a closed site does no work at all.
   if (slicerSender(env)) {
+    // Every try counts, right or wrong, BEFORE the phrase is compared: otherwise guessing is free.
+    // 60 a minute per address, the same as SLICE_RATE_ALL, so a school is never limited harder.
+    if (await overLimit(env.SLICE_RATE_IP, request)) {
+      return refuse(429, 'A lot of slicing is coming from your school right now. Wait a minute and try again.');
+    }
     const open = await readSlicing(env);
     if (!open) {
       return json(403, { error: 'closed', message: 'Slicing is closed right now. Your teacher opens it during class.' });
     }
-    if (normalizePhrase(request.headers.get('x-class-phrase')) !== open.phrase) {
+    // The page makes a ticket for every slice (its place in the line). A page from before the line
+    // has none: it must be reloaded.
+    if (!TICKET_PATTERN.test(request.headers.get('x-slice-ticket') ?? '')) {
+      return refuse(400, 'This page is out of date. Reload the page, then press Slice again.', { reload: true });
+    }
+    if (!(await constantTimeEquals(normalizePhrase(request.headers.get('x-class-phrase')), open.phrase))) {
       return json(403, { error: 'phrase', message: "That class phrase is not right. Check the board and type it again." });
     }
   }
@@ -316,7 +355,9 @@ async function handleSlice(request, env) {
     const tooFast = await slicerBudget(request, env);
     if (tooFast) return tooFast;
     const meshName = safeNamePart(form.get('modelName'), 'plate', LIMITS.maxFileNameLength);
-    return sliceWithEngine(send, stlBytes, checked.settings, fileName, classConfig.maxPrintMinutes, meshName, request.headers.get('x-slice-ticket'));
+    return sliceWithEngine(send, stlBytes, checked.settings, {
+      fileName, maxPrintMinutes: classConfig.maxPrintMinutes, meshName, ticket: request.headers.get('x-slice-ticket'), env,
+    });
   }
 
   return json(501, {
@@ -330,7 +371,7 @@ async function handleSlice(request, env) {
   });
 }
 
-async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinutes = 0, meshName = 'plate', ticket = null) {
+async function sliceWithEngine(send, stlBytes, settings, { fileName, maxPrintMinutes = 0, meshName = 'plate', ticket = null, env }) {
   let res;
   try {
     res = await send('/slice', {
@@ -343,14 +384,23 @@ async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinut
       },
     }, { ticket });
   } catch (err) {
-    // From the line in front of the slicer (src/index.js).
+    // From the line in front of the slicer (src/line.js sliceThroughLine).
     if (err?.code === 'full') return refuse(503, 'The line for the slicer is very long right now. Wait a few minutes and try again.');
-    if (err?.code === 'left') return refuse(409, 'You left the line for the slicer. Press Slice to try again.');
+    if (err?.code === 'reload') return refuse(400, 'This page is out of date. Reload the page, then press Slice again.', { reload: true });
+    if (err?.code === 'left') {
+      // The teacher closed slicing while this student waited (the page stops asking for its place).
+      if (!(await readSlicing(env))) return json(403, { error: 'closed', message: 'Slicing closed while you were in line. Your teacher opens it during class.' });
+      return refuse(409, 'You left the line for the slicer. Press Slice to try again.');
+    }
     return refuse(503, 'The slicer is not answering. Try again in a minute.');
   }
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
     console.error(JSON.stringify({ message: 'slicer refused', status: res.status, detail: detail.slice(0, 300) }));
+    // container/server.py SLICE_BUDGET_S ran out.
+    if (/took too long/.test(detail)) {
+      return refuse(502, 'This plate takes too long to slice. Try fewer models on the plate, Fast quality, or supports off if it does not need them.');
+    }
     return refuse(502, 'The slicer could not slice this model. Check it in the 3D view, or ask your teacher.');
   }
   const time = Number(res.headers.get('x-print-time-s'));
@@ -384,8 +434,18 @@ async function sliceWithEngine(send, stlBytes, settings, fileName, maxPrintMinut
   });
 }
 
+const POLLED = new Set(['/api/slicing', '/api/class', '/api/slice/line']);
+
 async function handleApi(request, env, url, ctx) {
   if (url.pathname === '/api/health') return json(200, { ok: true, engine: !!slicerSender(env) });
+  // The public endpoints that read KV or the line's Durable Object share one generous per-address
+  // limit (API_RATE_IP, wrangler.jsonc: 3000 a minute). What a class needs: each waiting or slicing
+  // page asks /api/slice/line every 2 s (web/src/main.js watchLine: 30 a minute), and the line holds
+  // at most MAX_WAITING (80) + 2 slicing, so 82 x 30 = 2460 a minute; plus /api/slicing (every 2 min
+  // and once per slice) and /api/class (once per page load). A class of 35 all in line is 1050.
+  if (POLLED.has(url.pathname) && await overLimit(env.API_RATE_IP, request)) {
+    return json(429, { error: 'busy', message: 'Too many requests from your network. Wait a minute and try again.' });
+  }
   if (url.pathname === '/api/slicing') {
     // Public: is slicing open, and until when. Never the phrase.
     const rec = await readSlicing(env);
@@ -397,12 +457,13 @@ async function handleApi(request, env, url, ctx) {
   }
   // Everything under /api/teacher/ needs the key, even paths that do not exist.
   if (url.pathname.startsWith('/api/teacher/')) return handleTeacher(request, env, url, ctx);
-  // Your place in the line for the slicer (src/line.js). Asked every couple of seconds while a
-  // slice waits; it only reaches the line's Durable Object, never a container.
+  // Your place in the line for the slicer (src/line.js). Asked every 2 s while a slice waits or
+  // runs; it only reaches the line's Durable Object, never a container, and not even that while
+  // slicing is closed (students still waiting then lose their place and are told it closed).
   if (url.pathname === '/api/slice/line') {
     const ticket = url.searchParams.get('ticket') ?? '';
     if (!TICKET_PATTERN.test(ticket)) return json(400, { error: 'ticket', message: 'Bad ticket.' });
-    if (!env.sliceLineStatus) return json(200, { state: 'none' });
+    if (!env.sliceLineStatus || !(await readSlicing(env))) return json(200, { state: 'none' });
     try {
       if (request.method === 'DELETE') {
         await env.sliceLineCancel(ticket);
