@@ -25,6 +25,8 @@ console.log('  message:', msg);
 check('no preview for a refused print', await page.evaluate(() => document.body.dataset.stage ?? 'prepare'), 'prepare');
 // Fast quality + no supports + smaller: fits under 2 h
 check('teacher raises the limit to 2 h', (await put({ maxPrintMinutes: 120 })).status(), 200);
+// The plate is saved 1.5 s after it last changed; a fast refusal comes back sooner than that.
+await page.waitForTimeout(2000);
 await page.reload();
 await page.waitForTimeout(600);
 await page.click('#action button.primary');
