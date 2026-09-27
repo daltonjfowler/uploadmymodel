@@ -18,11 +18,11 @@
     "axe-core": "4.10.3",
     "playwright-core": "1.55.0",
     "vite": "8.2.2",
-    "wrangler": "4.127.1"
+    "wrangler": "4.142.0"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
-    "workerd@1.20260828.1": true
+    "workerd@1.20260926.1": true
   },
   "dependencies": {
     "@cloudflare/containers": "0.3.7",
