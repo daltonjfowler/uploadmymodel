@@ -830,6 +830,16 @@ function usbBox() {
   }
   if (usb.state === 'done') box.append(el('p', { class: 'advice' }, usb.message));
   if (usb.state === 'error') box.append(el('p', { class: 'advice warn' }, usb.message));
+  if (usb.details) {
+    const d = el('details', { class: 'usb-details' });
+    d.append(el('summary', {}, 'Details for Dalton'));
+    const pre = el('pre', { class: 'note' }, usb.details);
+    pre.style.cssText = 'max-height:14em;overflow:auto;white-space:pre-wrap;font-size:11px';
+    const copy = el('button', { type: 'button' }, 'Copy details');
+    copy.addEventListener('click', () => navigator.clipboard?.writeText(usb.details).then(() => { copy.textContent = 'Copied'; }, () => {}));
+    d.append(pre, copy);
+    box.append(d);
+  }
   const go = el('button', { type: 'button', class: 'wide' }, '🔌 Copy to printer (USB)');
   go.addEventListener('click', () => copyToPrinter());
   box.append(go);
@@ -892,7 +902,8 @@ async function copyToPrinter() {
     const half = name ? ` Part of the file may be on the card as ${name}: tell your teacher not to print it.` : '';
     usb = err.name === 'AbortError'
       ? { state: 'error', message: `Stopped.${half}` }
-      : { state: 'error', message: `${err.message}${half}` };
+      : { state: 'error', message: `${err.message}${half}`, details: printer.log.join('\n') };
+    console.warn('USB copy failed', err, printer.log);
   } finally {
     usbAbort = null;
     await printer.close();

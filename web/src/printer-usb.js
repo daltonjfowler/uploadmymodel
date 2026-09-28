@@ -67,6 +67,8 @@ export class PrinterUsb {
     this.port = port;
     this.lines = [];      // received, not yet taken by a waiter
     this.listeners = new Set();
+    this.log = [];        // what went each way, for "Details for Dalton" (file lines only the first few)
+    this.fileLinesLogged = 0;
     this.lastData = 0;
     this.heard = 0;
     this.restarted = false;
@@ -110,6 +112,7 @@ export class PrinterUsb {
           this.buffer = this.buffer.slice(this.buffer[i] === '\r' ? i + 2 : i + 1);
           if (!line) continue;
           this.heard++;
+          this.note(`< ${line}`);
           if (line === 'start') this.restarted = true;
           for (const f of this.listeners) f(line);
         }
@@ -130,7 +133,16 @@ export class PrinterUsb {
     }
   }
 
+  note(entry) {
+    const bulk = /^< ok\b/.test(entry) && this.fileLinesLogged > 5;
+    if (bulk) return; // one "ok" per file line: too many to keep
+    this.log.push(`${((Date.now() - (this.t0 ??= Date.now())) / 1000).toFixed(1)}s ${entry}`);
+    if (this.log.length > 120) this.log.splice(0, this.log.length - 120);
+  }
+
   async write(text) {
+    const fileLine = /^N(\d+) /.exec(text) && Number(/^N(\d+)/.exec(text)[1]) >= 2;
+    if (!fileLine || this.fileLinesLogged++ < 5) this.note(`> ${text}`);
     await this.writer.write(new TextEncoder().encode(`${text}\n`));
   }
 
