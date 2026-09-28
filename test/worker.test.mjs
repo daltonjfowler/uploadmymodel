@@ -383,25 +383,25 @@ test('phrase lockout: 4 wrong are fine, the 5th locks; locked tries are never co
     assert.equal((await res.json()).error, 'phrase');
   }
   // Locked: even the RIGHT phrase is refused, because it is not compared at all.
-  const before = structuredClone(store.map.get('phrase/203.0.113.9'));
+  const before = structuredClone(store.map.get('phrase/ip%3A203.0.113.9'));
   for (const req of [await sliceRequest(), await wrong()]) {
     const res = await worker.fetch(req, e);
     assert.equal(res.status, 429);
     assert.equal(res.headers.get('retry-after'), '5');
     assert.deepEqual(await res.json(), { error: 'locked', retryAfter: 5, message: 'Too many wrong tries. Wait 5 seconds and try again.' });
   }
-  assert.deepEqual(store.map.get('phrase/203.0.113.9'), before, 'a locked try changes nothing');
+  assert.deepEqual(store.map.get('phrase/ip%3A203.0.113.9'), before, 'a locked try changes nothing');
   assert.equal(calls.length, 0, 'the slicer is never reached');
   // SLICE_RATE_IP still counted every try, before anything else (unchanged).
   assert.equal(perIp.seen.length, 7);
   // Lock over: one more wrong try locks for 10 s.
-  store.map.get('phrase/203.0.113.9').until = 0;
+  store.map.get('phrase/ip%3A203.0.113.9').until = 0;
   assert.equal((await worker.fetch(await wrong(), e)).status, 403);
   const res = await worker.fetch(await sliceRequest(), e);
   assert.equal(res.status, 429);
   assert.equal((await res.json()).retryAfter, 10);
   // Lock over again: the right phrase slices and clears the counter.
-  store.map.get('phrase/203.0.113.9').until = 0;
+  store.map.get('phrase/ip%3A203.0.113.9').until = 0;
   assert.equal((await worker.fetch(await sliceRequest(), e)).status, 200);
   assert.equal(store.map.size, 0);
   assert.equal(calls.length, 1);
@@ -439,8 +439,59 @@ test('teacher key lockout: 5 wrong keys lock; locked is refused without compare;
   assert.equal(body.message, 'Too many wrong tries. Wait 5 seconds and try again.');
   assert.ok(Date.now() - t0 < 250, 'no wrong-key wait: the key was never compared');
   // The class phrase counter is separate.
-  assert.equal(store.map.has('phrase/198.51.100.7'), false);
-  store.map.get('teacher/198.51.100.7').until = 0;
+  assert.equal(store.map.has('phrase/ip%3A198.51.100.7'), false);
+  store.map.get('teacher/ip%3A198.51.100.7').until = 0;
   assert.equal((await get('test-teacher-key-123')).status, 200);
   assert.equal(store.map.size, 0);
+});
+
+test('lockout is per device: two browsers on one school address are independent', async () => {
+  const calls = fakeSlicer();
+  const store = memoryStore();
+  const e = { ...env(), lockoutStore: store };
+  const kid = '0f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a';
+  const other = 'A1B2C3D4-E5F6-4789-8abc-def012345678'; // upper case is the same device lower-cased
+  const from = async (id, phrase) => {
+    const req = await sliceRequest({}, 'J', 'M', phrase);
+    req.headers.set('x-client-id', id);
+    return worker.fetch(req, e);
+  };
+  for (let i = 0; i < 5; i++) assert.equal((await from(kid, 'purple-walrus-taco')).status, 403);
+  assert.equal((await from(kid, 'Orange Walrus Taco')).status, 429); // this kid is locked...
+  assert.equal((await from(other, 'Orange Walrus Taco')).status, 200); // ...the next desk is not
+  assert.deepEqual([...store.map.keys()], [`phrase/${encodeURIComponent(`device:${kid}`)}`]);
+  assert.equal(calls.length, 1);
+});
+
+test('lockout falls back to the address when the id is missing or not a UUID', async () => {
+  const { whoFor } = await import('../src/lockout.js');
+  const req = (id) => new Request('https://x.test/', { headers: { 'cf-connecting-ip': '203.0.113.9', ...(id === undefined ? {} : { 'x-client-id': id }) } });
+  assert.equal(whoFor(req()), 'ip:203.0.113.9');
+  for (const junk of ['', 'abcdef12-3456', 'not-a-uuid-at-all-really', '0f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a-x', '0f8e7d6c5b4a439281706f5e4d3c2b1a']) {
+    assert.equal(whoFor(req(junk)), 'ip:203.0.113.9', junk);
+  }
+  assert.equal(whoFor(req(' 0F8E7D6C-5B4A-4392-8170-6F5E4D3C2B1A ')), 'device:0f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a');
+  // Garbage ids from one address share the address counter.
+  fakeSlicer();
+  const store = memoryStore();
+  const e = { ...env(), lockoutStore: store };
+  for (let i = 0; i < 5; i++) {
+    const r = await sliceRequest({}, 'J', 'M', 'purple-walrus-taco');
+    r.headers.set('x-client-id', `junk-${i}`);
+    assert.equal((await worker.fetch(r, e)).status, 403);
+  }
+  assert.equal((await worker.fetch(await sliceRequest(), e)).status, 429);
+});
+
+test('teacher key lockout is per device too: a student cannot lock the teacher out', async () => {
+  const store = memoryStore();
+  const e = { ...env(), TEACHER_KEY: 'test-teacher-key-123', lockoutStore: store };
+  const get = (key, id) => worker.fetch(new Request('https://uploadmymodel.com/api/teacher/class', {
+    headers: { 'x-teacher-key': key, 'x-client-id': id, 'cf-connecting-ip': '198.51.100.7' },
+  }), e);
+  const student = '11111111-2222-4333-8444-555555555555';
+  const teacher = '66666666-7777-4888-9999-aaaaaaaaaaaa';
+  for (let i = 0; i < 5; i++) assert.equal((await get('guess', student)).status, 401);
+  assert.equal((await get('test-teacher-key-123', student)).status, 429);
+  assert.equal((await get('test-teacher-key-123', teacher)).status, 200);
 });

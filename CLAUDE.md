@@ -72,13 +72,14 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   ("slicing"), checked before the upload is read, and only when a slicer is connected. Everything
   else on the site works without it. Never let a request reach the slicer outside the window.
 - The phrase is guarded by numbers: suggested phrases are one of over 2^28 (`PHRASE_WORDS` x 90;
-  kid-safe words only, see the comment there), a teacher's own needs 12+ characters, the compare is
-  constant-time, and every /api/slice try counts against `SLICE_RATE_IP` BEFORE the compare. A
+  kid-safe words only, see the comment there), a teacher's own can be any length (Dalton
+  2026-09-28; the lockout below guards it), the compare is constant-time, and every /api/slice try counts against `SLICE_RATE_IP` BEFORE the compare. A
   school shares ONE public address: per-address limits (`SLICE_RATE_IP`, `API_RATE_IP`) must never
   be tighter than `SLICE_RATE_ALL` / what a full line polling every 2 s needs (Dalton's rule).
-- Wrong-guess lockout (`src/lockout.js`, same on all sites): per IP, separately for the class phrase
-  and the teacher key, 5 wrong in a row lock 5 s, each further wrong doubles it (cap 300 s), a right
-  answer clears it. Checked AFTER `SLICE_RATE_IP`, BEFORE the compare; Cache API, falls open.
+- Wrong-guess lockout (`src/lockout.js`, same on all sites): per DEVICE (x-client-id UUID; IP only
+  when a request has none), so kids never lock out the class or teacher. Class phrase and teacher key
+  counted apart: 5 wrong in a row lock 5 s, each further wrong doubles it (cap 300 s), a right answer
+  clears it. Checked AFTER `SLICE_RATE_IP`, BEFORE the compare; Cache API, falls open.
 - Every slice needs the page's ticket (`x-slice-ticket`). The line only gives a slicer to a page
   that is still asking for its place, and frees a slot when the page stops asking or the browser
   goes away (`request.signal`, `enable_request_signal`). `LEASE_MS` = `SLICE_BUDGET_S` + 30 s.

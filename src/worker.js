@@ -151,7 +151,9 @@ async function readSlicing(env) {
 
 // Key compared first; a wrong key waits a moment (slows guessing). No secret uploaded means no
 // teacher endpoint at all: never fall open. The wrong-guess lockout (src/lockout.js, kind
-// 'teacher') is checked BEFORE the compare: a locked address is refused without comparing.
+// 'teacher') is checked BEFORE the compare: a locked device is refused without comparing. It
+// counts per DEVICE (the page's x-client-id), never per address: a school shares one IP, and a
+// per-address lockout would let one student lock out the teacher or the class.
 // null = the key is right; otherwise the answer to send.
 async function teacherRefusal(request, env) {
   const expected = env.TEACHER_KEY ?? '';
@@ -331,7 +333,7 @@ async function handleSlice(request, env) {
     if (!TICKET_PATTERN.test(request.headers.get('x-slice-ticket') ?? '')) {
       return refuse(400, 'This page is out of date. Reload the page, then press Slice again.', { reload: true });
     }
-    // Wrong-guess lockout (src/lockout.js): a locked address is refused WITHOUT comparing.
+    // Wrong-guess lockout (src/lockout.js), per device: a locked one is refused WITHOUT comparing.
     const lock = await lockout(env, 'phrase', request);
     if (lock.locked) return lock.response(json);
     if (!(await constantTimeEquals(normalizePhrase(request.headers.get('x-class-phrase')), open.phrase))) {

@@ -989,7 +989,7 @@ async function runSlice() {
         if (await askPhrase(body.message)) runSlice();
         return;
       } else if (res.status === 429 && body.error === 'locked') {
-        // Too many wrong phrases from this network: the server did not even check this one, so
+        // Too many wrong phrases from this browser: the server did not even check this one, so
         // keep the stored phrase and do not ask again (no loop). The student waits and presses Slice.
         slice = { state: 'error', message: body.message ?? `Too many wrong tries. Wait ${body.retryAfter ?? 5} seconds and try again.` };
       } else if (res.status === 403 && body.error === 'closed') {

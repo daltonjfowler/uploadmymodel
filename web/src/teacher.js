@@ -11,6 +11,18 @@ import { initThemeButton } from './theme.js';
 
 const KEY_STORAGE = 'umm.teacherKey';
 
+// A random id for this browser (the same one the student page makes), sent as x-client-id: the
+// server's wrong-key lockout counts per device, so one student cannot lock the teacher out.
+const CLIENT_ID = (() => {
+  try {
+    let id = localStorage.getItem('umm.client') ?? '';
+    if (!id) localStorage.setItem('umm.client', (id = crypto.randomUUID()));
+    return id;
+  } catch {
+    return crypto.randomUUID(); // no storage: a new id for this page only
+  }
+})();
+
 initThemeButton($('#theme'));
 
 let config = structuredClone(DEFAULT_CLASS_CONFIG);
@@ -56,7 +68,7 @@ async function api(method, body) {
   try {
     r = await fetch('/api/teacher/class', {
       method,
-      headers: { 'x-teacher-key': key, ...(body ? { 'content-type': 'application/json' } : {}) },
+      headers: { 'x-teacher-key': key, 'x-client-id': CLIENT_ID, ...(body ? { 'content-type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
@@ -69,7 +81,7 @@ async function api(method, body) {
   return j;
 }
 
-// Too many wrong keys from this network: the server waits before it checks keys again.
+// Too many wrong keys from this browser: the server waits before it checks keys again.
 function lockedMessage(j) {
   return j.message ?? `Too many wrong tries. Wait ${j.retryAfter ?? 5} seconds and try again.`;
 }
@@ -197,7 +209,7 @@ $('#save').addEventListener('click', async () => {
 $('#warmup').addEventListener('click', async () => {
   $('#warmStatus').textContent = 'Waking the slicer…';
   try {
-    const r = await fetch('/api/teacher/warmup', { method: 'POST', headers: { 'x-teacher-key': keyInput.value.trim() } });
+    const r = await fetch('/api/teacher/warmup', { method: 'POST', headers: { 'x-teacher-key': keyInput.value.trim(), 'x-client-id': CLIENT_ID } });
     const j = await r.json().catch(() => ({}));
     $('#warmStatus').textContent = r.ok ? `Ready (${j.engine ?? 'slicer'}, answered in ${j.seconds} s).`
       : r.status === 429 && j.error === 'locked' ? lockedMessage(j) : (j.message ?? `Not ready (${r.status}).`);
@@ -211,7 +223,7 @@ $('#warmup').addEventListener('click', async () => {
 async function slicingApi(method, body) {
   const r = await fetch('/api/teacher/slicing', {
     method,
-    headers: { 'x-teacher-key': keyInput.value.trim(), ...(body ? { 'content-type': 'application/json' } : {}) },
+    headers: { 'x-teacher-key': keyInput.value.trim(), 'x-client-id': CLIENT_ID, ...(body ? { 'content-type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const j = await r.json().catch(() => ({}));

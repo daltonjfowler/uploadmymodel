@@ -1,9 +1,13 @@
 // Wrong-guess lockout for the class phrase and the teacher key (Dalton: "x attempts, lock 5
-// seconds"). Per client address (CF-Connecting-IP) and per secret kind ('phrase', 'teacher'):
-//   - 5 wrong tries in a row lock that address for 5 s.
+// seconds"). Per DEVICE and per secret kind ('phrase', 'teacher'). The device is the page's own
+// random id (x-client-id, a UUID in localStorage), so one student's wrong tries never lock the
+// rest of the class or the teacher (Dalton: "I don't want kids to lock it"; a school shares one
+// IP). Only a request without a valid id (a script) is counted by its address instead. A script
+// can make up ids, so SLICE_RATE_IP stays the limit that cannot be got round.
+//   - 5 wrong tries in a row lock that device for 5 s (the 5th still gets the normal wrong answer).
 //   - While locked, every try is refused WITHOUT comparing the secret.
 //   - Each further wrong try after a lock ends doubles the lock: 5, 10, 20, 40, 80, 160, then 300 s.
-//   - A right answer from that address clears its counter.
+//   - A right answer from that device clears its counter.
 // The counter lives in the Cache API (caches.default, per data centre), not KV: it is free and has
 // no write quota. Every storage call is wrapped: if the cache fails (or does not exist, as in the
 // node unit tests), the lockout falls open to the old behaviour. It never replaces the rate limits.
@@ -74,9 +78,17 @@ function storeFor(env) {
   return null;
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Who is counted: `device:<uuid>` from x-client-id, else `ip:<CF-Connecting-IP>`. */
+export function whoFor(request) {
+  const id = (request.headers.get('x-client-id') ?? '').trim().toLowerCase();
+  if (UUID.test(id)) return `device:${id}`;
+  return `ip:${request.headers.get('cf-connecting-ip') ?? 'unknown'}`;
+}
+
 function keyFor(kind, request) {
-  const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
-  return `${kind}/${encodeURIComponent(ip)}`;
+  return `${kind}/${encodeURIComponent(whoFor(request))}`;
 }
 
 /**
