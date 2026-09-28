@@ -26,6 +26,7 @@ await ctx.addInitScript(() => {
         window.__printer.written.push(line);
         return say('ok P15 B3');
       }
+      if (line === 'M115' && !port.spared) { port.spared = true; say('echo:SD card ok', 'X:-50.00 Y:-17.00 Z:297.00', 'ok P15 B2'); } // like the school Workhorse
       if (line === 'M115') return say('FIRMWARE_NAME:Marlin  FIRMWARE_VERSION:2.0.9.0.13 MACHINE_TYPE:TAZ Workhorse Edition', 'Cap:SDCARD:1', 'Cap:SD_WRITE:1', 'ok P15 B3');
       if (line === 'M27') return say('Not SD printing', 'ok P15 B3');
       if (line === 'M20') return say('Begin file list', 'JORDAN01.GCO 1000', 'End file list', 'ok P15 B3');

@@ -56,6 +56,10 @@ function fakeWorkhorse({ garbleLine = -1, restartAfterLines = -1, files = ['LIZ_
       return;
     }
     if (/^M110/.test(line)) return say('ok P15 B3');
+    if (line === 'M115' && spare) {
+      spare = false;
+      return say('echo:SD card ok', 'X:-50.00 Y:-17.00 Z:297.00 E:0.00 Count X:-5000 Y:-1700 Z:148500', 'ok P15 B2', ...CAPS);
+    }
     if (line === 'M115') return say(...CAPS);
     if (line === 'M27') return say('Not SD printing', 'ok P15 B3');
     if (line === 'M20') return say('Begin file list', ...files.map((f) => `${f} 1000`), 'End file list', 'ok P15 B3');
@@ -65,6 +69,7 @@ function fakeWorkhorse({ garbleLine = -1, restartAfterLines = -1, files = ['LIZ_
     pr.run.push(line); // the printer would heat or move here
     say('ok P15 B3');
   };
+  let spare = true; // the real Workhorse's first answer after boot starts with a spare "ok"
   let garbled = false;
   pr.port = {
     readable: null,

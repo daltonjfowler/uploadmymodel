@@ -78,9 +78,12 @@ export class PrinterUsb {
     this.writer = this.port.writable.getWriter();
     this.reading = this.readLoop();
     await this.waitForBoot();
+    // Right after boot the Workhorse sends "echo:SD card ok", its position and a spare "ok" BEFORE
+    // the M115 answer (school log, 2026-09-28), so wait for the answer itself, not just any "ok".
     let hello = null;
-    for (let i = 0; i < 3 && !hello; i++) hello = await this.ask('M115', 3000);
+    for (let i = 0; i < 3 && !hello; i++) hello = await this.ask('M115', 3000, /FIRMWARE_NAME/);
     if (!hello) throw new Error('The printer did not answer. Check it is on and the USB cable is in, then try again.');
+    await this.settle(); // late answers to an earlier M115 try, spare "ok"s
     const text = hello.join('\n');
     if (!/Cap:SD_WRITE:1/.test(text)) throw new Error('This printer cannot save files from USB. Use the SD card instead.');
     this.restarted = false; // the reset from opening the port is expected
@@ -131,14 +134,25 @@ export class PrinterUsb {
     await this.writer.write(new TextEncoder().encode(`${text}\n`));
   }
 
-  /** Send one line and collect the reply up to "ok" (null after timeoutMs). */
-  async ask(cmd, timeoutMs = REPLY_MS) {
+  /** Wait until the printer has been quiet for `ms`. */
+  async settle(ms = 700) {
+    const t0 = Date.now();
+    while (Date.now() - Math.max(this.lastData, t0) < ms && Date.now() - t0 < 5000) await sleep(100);
+  }
+
+  /**
+   * Send one line and collect the reply up to "ok" (null after timeoutMs). With `until`, an "ok"
+   * only counts once a line matching it has come: a spare "ok" from before cannot end the answer.
+   */
+  async ask(cmd, timeoutMs = REPLY_MS, until = null) {
     const got = [];
+    let seen = !until;
     const reply = new Promise((resolve) => {
       const t = setTimeout(() => { this.listeners.delete(on); resolve(null); }, timeoutMs);
       const on = (line) => {
         got.push(line);
-        if (/^ok\b/.test(line)) { clearTimeout(t); this.listeners.delete(on); resolve(got); }
+        if (until?.test(line)) seen = true;
+        if (seen && /^ok\b/.test(line)) { clearTimeout(t); this.listeners.delete(on); resolve(got); }
       };
       this.listeners.add(on);
     });
@@ -148,10 +162,10 @@ export class PrinterUsb {
 
   /** Short names of the files on the card, and whether the printer is busy printing from it. */
   async cardState() {
-    const status = await this.ask('M27');
+    const status = await this.ask('M27', REPLY_MS, /SD printing/i);
     if (!status) throw new Error('The printer did not answer.');
     const printing = !status.some((l) => /Not SD printing/i.test(l));
-    const list = await this.ask('M20', 10000);
+    const list = await this.ask('M20', 10000, /End file list/i);
     if (!list || !list.some((l) => /Begin file list/i.test(l))) throw new Error('The printer has no SD card in it, or it cannot read it. Put the card in the printer and try again.');
     const files = list.filter((l) => !/^(ok|Begin file list|End file list)/i.test(l)).map((l) => l.split(' ')[0]);
     return { printing, files };
@@ -172,7 +186,8 @@ export class PrinterUsb {
       // Line numbers + checksums: the printer asks again for any line that got garbled.
       const reset = await this.ask(numbered(0, 'M110 N0'));
       if (!reset) throw new Error('The printer did not answer.');
-      const open = await this.ask(numbered(1, `M28 ${name}`), 8000);
+      await this.settle(300);
+      const open = await this.ask(numbered(1, `M28 ${name}`), 8000, /Writing to file|fail|error/i);
       if (!open || !open.some((l) => /Writing to file/i.test(l))) {
         throw new Error('The printer could not start a file on its SD card. Check the card is in the printer.');
       }
