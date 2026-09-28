@@ -37,19 +37,33 @@ await page.click('.arm-lock button[type=submit]');
 await page.waitForSelector('.arm-intro', { timeout: 5000 });
 check('right password opens the tab', await page.$eval('.tabs .arm-tab', (e) => e.textContent), 'Assistant to the Regional Manager');
 
+// Tiers: the third tab is Custom plus more, in the same sections.
+const count = (sel) => page.$$eval(sel, (n) => n.length);
+check('every infill pattern in one picker (7 class + 7 more)', await count('.patterns [role=radio]'), 14);
+await page.click('.cat-head:has-text("Walls")'); // fuzzy skin lives with the walls
+check('fuzz amount is hidden while fuzzy skin is off', await count('select[aria-label="Fuzz amount"]'), 0);
+check('wall count offers 1 to 6 in one list', await page.$$eval('.row select[aria-label="Wall count"] option', (o) => o.map((x) => x.value)), ['1', '2', '3', '4', '5', '6']);
 await page.click('.cat-rows button:has-text("Add a colour change pause")');
 await page.fill('.pause-row input', '5');
 await page.press('.pause-row input', 'Enter');
 await page.selectOption('select[aria-label="Fuzzy skin"]', 'on');
 await page.waitForTimeout(200);
-check('header summary shows the extras', /Fuzzy skin · 1 pause/.test(await page.$eval('.settings-summary', (e) => e.textContent)), true);
+check('fuzz amount shows once fuzzy skin is on', await count('select[aria-label="Fuzz amount"]'), 1);
+await page.click('.patterns [role=radio]:has-text("Gyroid")');
+await page.click('.patterns [role=radio]:has-text("Cross 3D")');
+await page.waitForTimeout(150);
+check('an extra pattern is picked in the same picker', await page.$eval('.patterns [aria-checked=true]', (e) => e.textContent.trim()), 'Cross 3D');
+await page.click('.tabs [role=tab]:has-text("Custom")');
+check('Custom keeps its 7 class patterns', await count('.patterns [role=radio]'), 7);
+await page.click('.tabs .arm-tab');
+check('header summary shows the extras', /Fuzzy skin · More infill patterns · 1 pause|Fuzzy skin · 1 pause/.test(await page.$eval('.settings-summary', (e) => e.textContent)), true);
 
 await page.screenshot({ path: 'test/browser/.out/arm.png' }).catch(() => {});
 await page.click('#sample');
 await page.click('#action button.primary');
 await page.waitForSelector('#action .result.ok', { timeout: 20000 });
 check('slice sends the password', sent?.key, KEY);
-check('slice sends the extras', sent?.arm, { settings: { fuzzy: 'on' }, pauses: [5] });
+check('slice sends the extras', sent?.arm, { settings: { fuzzy: 'on', morePatterns: 'cross_3d' }, pauses: [5] });
 check('result says where it pauses', /Colour change pause at 5 mm \(layer 18\)/.test(await page.$eval('#action .result.ok', (e) => e.textContent)), true);
 console.log(errors.join('\n') || 'no errors');
 await browser.close();

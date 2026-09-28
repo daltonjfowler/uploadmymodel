@@ -57,6 +57,35 @@ function lightning() {
   ].join('');
 }
 
+// The "Assistant to the Regional Manager" extras (shared/arm.js morePatterns).
+function concentric() {
+  const out = [];
+  for (let i = 3; i < S / 2; i += 5) out.push(`M${i} ${i}H${S - i}V${S - i}H${i}Z`);
+  return out.join('');
+}
+
+function zigzag() {
+  const out = [];
+  for (let y = 4; y < S; y += 7) out.push(`M0 ${y}L${S} ${y}`);
+  for (let x = 0, k = 0; x <= S; x += 6, k++) out.push(`M${x} ${4 + (k % 2) * 7}L${x} ${11 + (k % 2) * 7}`);
+  return out.join('');
+}
+
+function cross(tilt = 0) {
+  // Plus signs in a row, like Cura's squishy cross layers.
+  const out = [];
+  for (let y = 5; y < S; y += 10) {
+    for (let x = 5 + (tilt && (y / 10) % 2 ? 5 : 0); x < S; x += 10) out.push(`M${x - 4} ${y}H${x + 4}M${x} ${y - 4}V${y + 4}`);
+  }
+  return out.join('');
+}
+
+function subdiv() {
+  // Big squares in the middle, small near the edges.
+  return 'M10 10H30V30H10Z' + [[2, 2], [2, 10], [2, 18], [2, 26], [2, 34], [34, 2], [34, 10], [34, 18], [34, 26], [34, 34], [10, 2], [18, 2], [26, 2], [10, 34], [18, 34], [26, 34]]
+    .map(([x, y]) => `M${x} ${y}h4v4h-4Z`).join('');
+}
+
 const PATHS = {
   grid: () => lines(45, 8) + lines(-45, 8),
   lines: () => lines(45, 6),
@@ -65,6 +94,13 @@ const PATHS = {
   cubic: cubes,
   gyroid,
   lightning,
+  concentric,
+  zigzag,
+  cross: () => cross(0),
+  cross_3d: () => cross(1),
+  quarter_cubic: () => lines(30, 9) + lines(-30, 9),
+  tetrahedral: () => lines(45, 10) + lines(-45, 10) + lines(0, 10, 5),
+  cubicsubdiv: subdiv,
 };
 
 export function patternIcon(id) {

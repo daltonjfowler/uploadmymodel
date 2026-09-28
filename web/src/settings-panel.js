@@ -3,7 +3,7 @@
 // teacher's locked settings greyed out). Both tabs edit the same settings object.
 
 import {
-  ADHESION_CHOICES, DEFAULT_CLASS_CONFIG, INFILL_PATTERNS, QUALITIES, SECTIONS, SETTINGS, SIMPLE_ADHESION, SIMPLE_QUALITIES, lockedRows,
+  ADHESION_CHOICES, DEFAULT_CLASS_CONFIG, INFILL_PATTERNS, WALL_CHOICES, QUALITIES, SECTIONS, SETTINGS, SIMPLE_ADHESION, SIMPLE_QUALITIES, lockedRows,
   SUPPORT_CHOICES, TREE_SUPPORT_INFILL, applyClassLocks, isClassDefault, qualityById, summarize,
   validateClassConfig, validateSettings,
 } from '../../shared/settings.js';
@@ -91,9 +91,8 @@ export class SettingsPanel extends EventTarget {
     const mode = load(STORE_MODE, 'recommended');
     this.mode = ['custom', 'arm'].includes(mode) ? mode : 'recommended';
     if (this.mode === 'arm' && !this.armKey) this.mode = 'custom';
-    this.openArmSections = new Set(['pauses', 'looks']);
     this.open = load(STORE_OPEN, true) !== false;
-    this.openSections = new Set(['quality', 'infill', 'support']);
+    this.openSections = new Set(['pauses', 'quality', 'infill', 'support']);
     this.overhangs = 0; // mm² of red faces on the plate, from the viewer
     this.hasModels = false;
     this.render();
@@ -321,9 +320,13 @@ export class SettingsPanel extends EventTarget {
     }
   }
 
-  renderCustom(body) {
+  renderCustom(body, arm = false) {
     const s = this.settings;
-    for (const sec of SECTIONS) {
+    const active = arm ? activeArm(this.arm, s) : {};
+    const sections = arm
+      ? [...ARM_SECTIONS.filter((x) => x.first), ...SECTIONS, ...ARM_SECTIONS.filter((x) => !x.first)]
+      : SECTIONS;
+    for (const sec of sections) {
       const open = this.openSections.has(sec.id);
       const wrap = el('section', { class: `cat ${open ? 'open' : ''}` });
       const head = el('button', { type: 'button', class: 'cat-head', 'aria-expanded': String(open) });
@@ -336,9 +339,18 @@ export class SettingsPanel extends EventTarget {
       wrap.append(head);
       if (open) {
         const rows = el('div', { class: 'cat-rows' });
-        if (sec.id === 'support') this.supportRows(rows, s);
-        else for (const def of SETTINGS.filter((d) => d.section === sec.id)) rows.append(this.customRow(def));
+        if (sec.id === 'pauses') this.pauseRows(rows);
+        else if (sec.id === 'support') this.supportRows(rows, s);
+        else for (const def of SETTINGS.filter((d) => d.section === sec.id)) rows.append(this.customRow(def, arm));
         this.extraRows(sec.id, rows, s);
+        // The third tab's extra rows for this section; a row whose parent setting is off is hidden.
+        if (arm) {
+          for (const def of ARM_SETTINGS.filter((d) => d.section === sec.id && !d.merged)) {
+            if (def.needs && Object.entries(def.needs).some(([k, want]) => (this.arm.settings[k] ?? 'profile') !== want)) continue;
+            if (def.needsBase && Object.entries(def.needsBase).some(([k, want]) => s[k] !== want)) continue;
+            rows.append(this.armRow(def, active));
+          }
+        }
         wrap.append(rows);
       }
       body.append(wrap);
@@ -393,31 +405,12 @@ export class SettingsPanel extends EventTarget {
 
   renderArm(body) {
     const intro = el('div', { class: 'arm-intro' });
-    intro.append(el('p', { class: 'note' }, 'Temperatures and speeds stay locked, so nothing here can hurt the printer. Everything starts at the profile default.'));
+    intro.append(el('p', { class: 'note' }, 'Everything in Custom, plus much more. Temperatures and speeds stay locked, so nothing here can hurt the printer.'));
     const lockBtn = el('button', { type: 'button', class: 'linkbtn' }, '🔒 Lock this tab');
     lockBtn.addEventListener('click', () => this.lockArm());
     intro.append(lockBtn);
     body.append(intro);
-    const active = activeArm(this.arm, this.settings);
-    for (const sec of ARM_SECTIONS) {
-      const open = this.openArmSections.has(sec.id);
-      const wrap = el('section', { class: `cat ${open ? 'open' : ''}` });
-      const head = el('button', { type: 'button', class: 'cat-head', 'aria-expanded': String(open) });
-      head.innerHTML = `<span class="cat-icon" aria-hidden="true">${sec.icon}</span><span>${esc(sec.label)}</span><span class="chev" aria-hidden="true">${open ? '▴' : '▾'}</span>`;
-      head.addEventListener('click', () => {
-        if (open) this.openArmSections.delete(sec.id);
-        else this.openArmSections.add(sec.id);
-        this.render();
-      });
-      wrap.append(head);
-      if (open) {
-        const rows = el('div', { class: 'cat-rows' });
-        if (sec.id === 'pauses') this.pauseRows(rows);
-        for (const def of ARM_SETTINGS.filter((d) => d.section === sec.id)) rows.append(this.armRow(def, active));
-        wrap.append(rows);
-      }
-      body.append(wrap);
-    }
+    this.renderCustom(body, true);
     if (armIsUsed(this.arm)) {
       const clear = el('button', { type: 'button', class: 'linkbtn' }, '↺ Set every extra back to the profile');
       clear.addEventListener('click', () => this.setArm({ settings: {}, pauses: [] }));
@@ -425,19 +418,11 @@ export class SettingsPanel extends EventTarget {
     }
   }
 
-  armRow(def, active) {
+  armRow(def) {
     const value = this.arm.settings[def.id] ?? 'profile';
-    const teacherLocked = !!def.overrides && this.isLocked(def.overrides);
-    let why = '';
-    if (teacherLocked) why = 'Your teacher locked this for the class.';
-    else if (value !== 'profile' && !active[def.id]) {
-      why = def.needs
-        ? `Only works with ${Object.keys(def.needs).map((k) => ARM_SETTINGS.find((d) => d.id === k).label).join(', ')} on.`
-        : def.help;
-    }
-    const row = el('div', { class: `row ${why ? 'arm-off' : ''}`.trim() });
+    const row = el('div', { class: 'row' });
     row.append(el('span', { class: 'row-label' }, def.label));
-    const select = el('select', { 'aria-label': def.label, disabled: teacherLocked ? '' : null });
+    const select = el('select', { 'aria-label': def.label });
     for (const o of def.options) {
       const opt = el('option', { value: o.id }, o.label);
       if (o.id === value) opt.selected = true;
@@ -451,10 +436,7 @@ export class SettingsPanel extends EventTarget {
     row.append(select);
     const current = def.options.find((o) => o.id === value);
     this.hintOn(row, def.label, def.help + (current?.blurb ? `\n\n${current.label}: ${current.blurb}` : ''));
-    if (!why) return row;
-    const wrap = el('div', { class: 'arm-row-wrap' });
-    wrap.append(row, el('p', { class: 'note arm-why' }, why));
-    return wrap;
+    return row;
   }
 
   pauseRows(rows) {
@@ -555,7 +537,7 @@ export class SettingsPanel extends EventTarget {
     return seg;
   }
 
-  customRow(def) {
+  customRow(def, arm = false) {
     if (this.isLocked(def.id)) {
       return this.infoRow(def.label, valueText(def.id, this.settings[def.id]), `Your teacher set this for the class. ${def.help}`, true);
     }
@@ -568,7 +550,9 @@ export class SettingsPanel extends EventTarget {
       row.append(this.rangeSlider(def.id, true));
     } else if (def.id === 'infillPattern') {
       row.classList.add('wide');
-      row.append(this.patternPicker());
+      row.append(this.patternPicker(arm));
+    } else if (def.id === 'walls' && arm) {
+      row.append(this.wallsSelect(def));
     } else {
       const select = el('select', { 'aria-label': def.label });
       for (const opt of def.options) {
@@ -585,6 +569,31 @@ export class SettingsPanel extends EventTarget {
     const current = def.options?.find((o) => o.id === value);
     this.hintOn(row, def.label, def.help + (current?.blurb ? `\n\n${current.label}: ${current.blurb}` : ''));
     return row;
+  }
+
+  wallsSelect(def) {
+    const more = ARM_SETTINGS.find((d) => d.id === 'moreWalls').options.filter((o) => o.value !== null);
+    const choices = [...WALL_CHOICES.map((w) => ({ id: String(w.id), label: w.label, base: w.id })), ...more.map((o) => ({ id: o.id, label: o.label, extra: o.id }))]
+      .sort((a, b) => Number(a.id) - Number(b.id));
+    const current = this.arm.settings.moreWalls ?? String(this.settings.walls);
+    const select = el('select', { 'aria-label': def.label });
+    for (const c of choices) {
+      const o = el('option', { value: c.id }, c.label);
+      if (c.id === current) o.selected = true;
+      select.append(o);
+    }
+    select.addEventListener('change', () => {
+      const c = choices.find((x) => x.id === select.value);
+      const { moreWalls, ...rest } = this.arm.settings;
+      if (c.extra) return this.setArm({ settings: { ...rest, moreWalls: c.extra }, pauses: this.arm.pauses });
+      this.arm = { settings: rest, pauses: this.arm.pauses };
+      save(STORE_ARM, this.arm);
+      if (this.settings.walls === c.base) {
+        this.render();
+        this.dispatchEvent(new Event('change'));
+      } else this.set('walls', c.base);
+    });
+    return select;
   }
 
   infoRow(label, value, help, locked = false) {
@@ -628,13 +637,29 @@ export class SettingsPanel extends EventTarget {
     return wrap;
   }
 
-  patternPicker() {
+  // Custom: the class patterns. The third tab: every pattern Cura 4.13.2 has, in one picker (the
+  // extra ones are its morePatterns setting, shared/arm.js).
+  patternPicker(arm = false) {
     const grid = el('div', { class: 'patterns', role: 'radiogroup', 'aria-label': 'Infill pattern' });
-    for (const p of INFILL_PATTERNS) {
-      const on = this.settings.infillPattern === p.id;
+    const extra = arm ? ARM_SETTINGS.find((d) => d.id === 'morePatterns').options.filter((o) => o.value !== null) : [];
+    const picked = (arm && this.arm.settings.morePatterns) || this.settings.infillPattern;
+    for (const p of [...INFILL_PATTERNS, ...extra]) {
+      const isExtra = extra.includes(p);
+      const on = picked === p.id;
       const b = el('button', { type: 'button', role: 'radio', 'aria-checked': String(on), class: on ? 'on' : '' });
       b.innerHTML = `${patternIcon(p.id)}<span>${esc(p.label)}</span>`;
-      b.addEventListener('click', () => this.set('infillPattern', p.id));
+      b.addEventListener('click', () => {
+        if (isExtra) return this.setArm({ settings: { ...this.arm.settings, morePatterns: p.id }, pauses: this.arm.pauses });
+        if (this.arm.settings.morePatterns) {
+          const { morePatterns, ...rest } = this.arm.settings;
+          this.arm = { settings: rest, pauses: this.arm.pauses };
+          save(STORE_ARM, this.arm);
+        }
+        if (this.settings.infillPattern === p.id) {
+          this.render();
+          this.dispatchEvent(new Event('change'));
+        } else this.set('infillPattern', p.id);
+      });
       this.hintOn(b, `${p.label} infill`, p.blurb);
       grid.append(b);
     }
