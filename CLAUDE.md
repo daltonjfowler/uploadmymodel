@@ -17,6 +17,9 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   - `src/main.js`: tools, object list, Slice / result card, keyboard, drag and drop.
   - `teacher/index.html` + `src/teacher.js`: the teacher page (key, slicing window + class phrase,
     which settings are locked, class defaults, print-time limit, note, slicer warm-up).
+  - `src/printer-usb.js`: "Copy to printer (USB)": writes the G-code onto the printer's SD card with
+    M28/M29 (never prints, never deletes). Lines go out only after "Writing to file"; the copy stops if
+    the printer restarts. Tests: `test/printer-usb.test.mjs`, `test/browser/usbcopy.test.mjs`.
   - `usb-test/index.html` + `src/usb-test.js`: read-only printer USB test (Web Serial; only M115,
     M105, M27, M20 can be sent). Plan for print-from-USB: docs/USB_PRINTING.md.
   - `src/loaders.js`: STL / OBJ / 3MF → triangle soup, and the sample model.

@@ -205,6 +205,10 @@ test('class setup: print time limit is one of the choices', () => {
   assert.equal(validateClassConfig({}).config.maxPrintMinutes, 0);
   assert.equal(validateClassConfig({ maxPrintMinutes: 120 }).config.maxPrintMinutes, 120);
   for (const bad of [100, -30, '60', 60.5, null]) assert.equal(validateClassConfig({ maxPrintMinutes: bad }).ok, false, String(bad));
+  // USB copy to the printer's card: on unless the teacher turns it off (old saved setups keep it on).
+  assert.equal(validateClassConfig({}).config.usbCopy, true);
+  assert.equal(validateClassConfig({ usbCopy: false }).config.usbCopy, false);
+  assert.equal(validateClassConfig({ usbCopy: 'no' }).ok, false);
 });
 
 test('class setup: locked settings must match the teacher, open ones may differ', () => {

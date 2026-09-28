@@ -8,6 +8,7 @@ import { $, el, esc, fmt } from './dom.js';
 import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.js';
 import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
 import { meshHealth } from './mesh-health.js';
+import { PrinterUsb, cardLines, sdName } from './printer-usb.js';
 import { clearPlate, loadPlate, savePlate } from './plate-store.js';
 import { SettingsPanel } from './settings-panel.js';
 import { splitParts } from './split.js';
@@ -20,6 +21,9 @@ const STORE_PHRASE = 'umm.phrase'; // this tab only (sessionStorage), like the s
 // Is slicing open? Asked of the Worker (never the slicer, so it costs nothing): on load, every two
 // minutes, and before each slice. engine=false means this site has no slicer, so no gate.
 let slicing = { engine: false, open: false, until: null };
+// Copy to the printer's SD card over USB: { state: 'idle' | 'working' | 'done' | 'error', ... }.
+let usb = { state: 'idle' };
+let usbAbort = null;
 async function refreshSlicing() {
   try {
     const r = await fetch('/api/slicing', { cache: 'no-store' });
@@ -794,6 +798,7 @@ function renderAction() {
     save.addEventListener('click', () => downloadResult());
     card.append(save);
     card.append(el('p', { class: 'note' }, 'Save it onto the SD card, then eject the card before you pull it out.'));
+    if (panel.config.usbCopy !== false && 'serial' in navigator) card.append(usbBox());
     return;
   } else if (slice.state === 'error') {
     card.append(el('p', { class: 'advice warn' }, slice.message));
@@ -810,7 +815,94 @@ function renderAction() {
   card.append(go);
 }
 
+// ---- Copy to the printer over USB ---------------------------------------------------------------
+
+function usbBox() {
+  const box = el('div', { class: 'usb-copy', id: 'usbBox' });
+  if (usb.state === 'working') {
+    box.append(el('p', { class: 'note', id: 'usbStatus' }, usb.status ?? 'Connecting…'));
+    const bar = el('progress', { id: 'usbBar', max: '1', value: String(usb.progress ?? 0), class: 'wide' });
+    box.append(bar);
+    const cancel = el('button', { type: 'button', class: 'wide' }, 'Stop copying');
+    cancel.addEventListener('click', () => usbAbort?.abort());
+    box.append(cancel);
+    return box;
+  }
+  if (usb.state === 'done') box.append(el('p', { class: 'advice' }, usb.message));
+  if (usb.state === 'error') box.append(el('p', { class: 'advice warn' }, usb.message));
+  const go = el('button', { type: 'button', class: 'wide' }, '🔌 Copy to printer (USB)');
+  go.addEventListener('click', () => copyToPrinter());
+  box.append(go);
+  box.append(el('p', { class: 'note' }, "Or plug in the printer's USB cable and copy it straight onto the printer's SD card. It does not start the print: your teacher does that on the printer."));
+  return box;
+}
+
+function paintUsb() {
+  const status = $('#usbStatus');
+  if (status) status.textContent = usb.status;
+  const bar = $('#usbBar');
+  if (bar) bar.value = usb.progress ?? 0;
+}
+
+async function copyToPrinter() {
+  if (!slice.blob || usb.state === 'working') return;
+  let lines;
+  try {
+    lines = cardLines(await slice.blob.text());
+  } catch (err) {
+    usb = { state: 'error', message: err.message };
+    renderAction();
+    return;
+  }
+  let port;
+  try {
+    port = await navigator.serial.requestPort({});
+  } catch {
+    return; // no printer picked
+  }
+  const printer = new PrinterUsb(port);
+  usbAbort = new AbortController();
+  usb = { state: 'working', status: 'Connecting to the printer… (it restarts, about 5 seconds)', progress: 0 };
+  renderAction();
+  let name = '';
+  try {
+    await printer.open();
+    usb.status = 'Checking the SD card…';
+    paintUsb();
+    const card = await printer.cardState();
+    if (card.printing) throw new Error('The printer is printing from its SD card right now. Wait until it is done.');
+    name = sdName(fileName().replace(/\.gcode$/i, ''), card.files);
+    const t0 = Date.now();
+    await printer.copy(lines, name, {
+      signal: usbAbort.signal,
+      onProgress(done, total) {
+        const s = (Date.now() - t0) / 1000;
+        const rate = s > 2 ? done / s : 0;
+        const left = rate ? (total - done) / rate : 0;
+        usb.progress = done / total;
+        usb.status = `Copying as ${name}: ${Math.round((done / total) * 100)}%`
+          + (rate ? `, ${fmt(rate / 1024)} KB/s, about ${left >= 60 ? `${Math.round(left / 60)} min` : `${Math.max(1, Math.round(left))} s`} left` : '');
+        paintUsb();
+      },
+    });
+    const s = Math.round((Date.now() - t0) / 1000);
+    usb = { state: 'done', message: `✓ Saved on the printer as ${name} (${s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`}). Tell your teacher it is ready to print.` };
+    console.info(`USB copy: ${name}, ${lines.length} lines, ${s} s`);
+  } catch (err) {
+    const half = name ? ` Part of the file may be on the card as ${name}: tell your teacher not to print it.` : '';
+    usb = err.name === 'AbortError'
+      ? { state: 'error', message: `Stopped.${half}` }
+      : { state: 'error', message: `${err.message}${half}` };
+  } finally {
+    usbAbort = null;
+    await printer.close();
+  }
+  renderAction();
+}
+
 function invalidateSlice() {
+  if (usb.state === 'working') return; // never drop the file in the middle of a copy
+  usb = { state: 'idle' };
   if (slice.state === 'slicing') sliceAbort?.abort();
   if (slice.url) URL.revokeObjectURL(slice.url);
   slice = { state: 'idle' };

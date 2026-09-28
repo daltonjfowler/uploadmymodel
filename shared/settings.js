@@ -320,6 +320,8 @@ export const DEFAULT_CLASS_CONFIG = Object.freeze({
   defaults: CLASS_DEFAULTS,
   message: '',
   maxPrintMinutes: 0,
+  // Students may copy their file onto the printer's SD card over USB (web/src/printer-usb.js).
+  usbCopy: true,
 });
 
 /** 150 -> "2 h 30 min", 45 -> "45 min". */
@@ -365,7 +367,12 @@ export function validateClassConfig(input) {
     if (PRINT_LIMITS.includes(input.maxPrintMinutes)) maxPrintMinutes = input.maxPrintMinutes;
     else errors.push('maxPrintMinutes: not one of the choices');
   }
-  return errors.length ? { ok: false, errors } : { ok: true, config: { open, defaults, message, maxPrintMinutes } };
+  let usbCopy = DEFAULT_CLASS_CONFIG.usbCopy;
+  if (input.usbCopy !== undefined) {
+    if (typeof input.usbCopy === 'boolean') usbCopy = input.usbCopy;
+    else errors.push('usbCopy: must be true or false');
+  }
+  return errors.length ? { ok: false, errors } : { ok: true, config: { open, defaults, message, maxPrintMinutes, usbCopy } };
 }
 
 /** Student settings checked against the class setup: locked settings must equal the teacher's. */

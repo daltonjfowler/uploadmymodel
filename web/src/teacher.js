@@ -126,8 +126,13 @@ function renderRows() {
     if (m === (config.maxPrintMinutes ?? 0)) o.selected = true;
     max.append(o);
   }
+  $('#usbCopy').checked = config.usbCopy !== false;
   renderSummary();
 }
+
+$('#usbCopy').addEventListener('change', () => {
+  config.usbCopy = $('#usbCopy').checked;
+});
 
 $('#maxPrint').addEventListener('change', () => {
   config.maxPrintMinutes = Number($('#maxPrint').value);
