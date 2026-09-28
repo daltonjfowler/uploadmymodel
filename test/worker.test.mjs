@@ -8,6 +8,7 @@ import { afterEach, test } from 'node:test';
 import worker, { constantTimeEquals } from '../src/worker.js';
 import { LineError } from '../src/line.js';
 import { PRINTER } from '../shared/settings.js';
+import { memoryStore } from '../src/lockout.js';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -366,4 +367,80 @@ test('teacher: "Set new phrase" swaps the phrase and keeps the end time; refused
   assert.equal(s.phrase, 'room-12');
   assert.equal(s.until, until);
   assert.equal((await (await teacher('GET')).json()).phrase, 'room-12');
+});
+
+// ---- Wrong-guess lockout (src/lockout.js) -------------------------------------------------------
+
+test('phrase lockout: 4 wrong are fine, the 5th locks; locked tries are never compared or sliced', async () => {
+  const calls = fakeSlicer();
+  const store = memoryStore();
+  const perIp = limiter(1000);
+  const e = { ...env(), lockoutStore: store, SLICE_RATE_IP: perIp };
+  const wrong = () => sliceRequest({}, 'J', 'M', 'purple-walrus-taco');
+  for (let i = 1; i <= 5; i++) {
+    const res = await worker.fetch(await wrong(), e);
+    assert.equal(res.status, 403, `try ${i}`);
+    assert.equal((await res.json()).error, 'phrase');
+  }
+  // Locked: even the RIGHT phrase is refused, because it is not compared at all.
+  const before = structuredClone(store.map.get('phrase/203.0.113.9'));
+  for (const req of [await sliceRequest(), await wrong()]) {
+    const res = await worker.fetch(req, e);
+    assert.equal(res.status, 429);
+    assert.equal(res.headers.get('retry-after'), '5');
+    assert.deepEqual(await res.json(), { error: 'locked', retryAfter: 5, message: 'Too many wrong tries. Wait 5 seconds and try again.' });
+  }
+  assert.deepEqual(store.map.get('phrase/203.0.113.9'), before, 'a locked try changes nothing');
+  assert.equal(calls.length, 0, 'the slicer is never reached');
+  // SLICE_RATE_IP still counted every try, before anything else (unchanged).
+  assert.equal(perIp.seen.length, 7);
+  // Lock over: one more wrong try locks for 10 s.
+  store.map.get('phrase/203.0.113.9').until = 0;
+  assert.equal((await worker.fetch(await wrong(), e)).status, 403);
+  const res = await worker.fetch(await sliceRequest(), e);
+  assert.equal(res.status, 429);
+  assert.equal((await res.json()).retryAfter, 10);
+  // Lock over again: the right phrase slices and clears the counter.
+  store.map.get('phrase/203.0.113.9').until = 0;
+  assert.equal((await worker.fetch(await sliceRequest(), e)).status, 200);
+  assert.equal(store.map.size, 0);
+  assert.equal(calls.length, 1);
+});
+
+test('phrase lockout: a broken cache falls open to the old behaviour', async () => {
+  const calls = fakeSlicer();
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const e = { ...env(), lockoutStore: memoryStore({ fail: true }) };
+    for (let i = 0; i < 8; i++) {
+      assert.equal((await worker.fetch(await sliceRequest({}, 'J', 'M', 'purple-walrus-taco'), e)).status, 403);
+    }
+    assert.equal((await worker.fetch(await sliceRequest(), e)).status, 200);
+  } finally {
+    console.error = quiet;
+  }
+  assert.equal(calls.length, 1);
+});
+
+test('teacher key lockout: 5 wrong keys lock; locked is refused without compare; right key clears', async () => {
+  const store = memoryStore();
+  const e = { ...env(), TEACHER_KEY: 'test-teacher-key-123', lockoutStore: store };
+  const get = (key) => worker.fetch(new Request('https://uploadmymodel.com/api/teacher/class', {
+    headers: { 'x-teacher-key': key, 'cf-connecting-ip': '198.51.100.7' },
+  }), e);
+  for (let i = 1; i <= 5; i++) assert.equal((await get('guess')).status, 401, `try ${i}`);
+  const t0 = Date.now();
+  const res = await get('test-teacher-key-123');
+  assert.equal(res.status, 429);
+  assert.equal(res.headers.get('retry-after'), '5');
+  const body = await res.json();
+  assert.equal(body.error, 'locked');
+  assert.equal(body.message, 'Too many wrong tries. Wait 5 seconds and try again.');
+  assert.ok(Date.now() - t0 < 250, 'no wrong-key wait: the key was never compared');
+  // The class phrase counter is separate.
+  assert.equal(store.map.has('phrase/198.51.100.7'), false);
+  store.map.get('teacher/198.51.100.7').until = 0;
+  assert.equal((await get('test-teacher-key-123')).status, 200);
+  assert.equal(store.map.size, 0);
 });

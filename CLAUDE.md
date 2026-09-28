@@ -76,6 +76,9 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   constant-time, and every /api/slice try counts against `SLICE_RATE_IP` BEFORE the compare. A
   school shares ONE public address: per-address limits (`SLICE_RATE_IP`, `API_RATE_IP`) must never
   be tighter than `SLICE_RATE_ALL` / what a full line polling every 2 s needs (Dalton's rule).
+- Wrong-guess lockout (`src/lockout.js`, same on all sites): per IP, separately for the class phrase
+  and the teacher key, 5 wrong in a row lock 5 s, each further wrong doubles it (cap 300 s), a right
+  answer clears it. Checked AFTER `SLICE_RATE_IP`, BEFORE the compare; Cache API, falls open.
 - Every slice needs the page's ticket (`x-slice-ticket`). The line only gives a slicer to a page
   that is still asking for its place, and frees a slot when the page stops asking or the browser
   goes away (`request.signal`, `enable_request_signal`). `LEASE_MS` = `SLICE_BUDGET_S` + 30 s.

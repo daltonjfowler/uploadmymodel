@@ -19,6 +19,7 @@ import {
 } from '../shared/settings.js';
 import { MAX_PHRASE, MIN_PHRASE, generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
 import { TICKET_PATTERN } from './line.js';
+import { lockout } from './lockout.js';
 
 const KV_CLASS = 'class';
 const KV_SLICING = 'slicing'; // { phrase, until } while the teacher has slicing open
@@ -149,21 +150,29 @@ async function readSlicing(env) {
 }
 
 // Key compared first; a wrong key waits a moment (slows guessing). No secret uploaded means no
-// teacher endpoint at all: never fall open. The key is long and random, so there is no lockout:
-// a school shares one IP, and a lockout would let one student lock out the teacher.
-async function teacherOk(request, env) {
+// teacher endpoint at all: never fall open. The wrong-guess lockout (src/lockout.js, kind
+// 'teacher') is checked BEFORE the compare: a locked address is refused without comparing.
+// null = the key is right; otherwise the answer to send.
+async function teacherRefusal(request, env) {
   const expected = env.TEACHER_KEY ?? '';
   if (expected === '') {
     console.error(JSON.stringify({ message: 'TEACHER_KEY is not set; teacher endpoint refused' }));
-  } else if (await constantTimeEquals(request.headers.get('x-teacher-key') ?? '', expected)) {
-    return true;
+  } else {
+    const lock = await lockout(env, 'teacher', request);
+    if (lock.locked) return lock.response(json);
+    if (await constantTimeEquals(request.headers.get('x-teacher-key') ?? '', expected)) {
+      await lock.right();
+      return null;
+    }
+    await lock.wrong();
   }
   await new Promise((r) => setTimeout(r, TEACHER_REJECT_DELAY_MS));
-  return false;
+  return json(401, { error: 'key', message: 'Wrong teacher key.' });
 }
 
 async function handleTeacher(request, env, url, ctx) {
-  if (!(await teacherOk(request, env))) return json(401, { error: 'key', message: 'Wrong teacher key.' });
+  const refused = await teacherRefusal(request, env);
+  if (refused) return refused;
   if (url.pathname === '/api/teacher/slicing') {
     if (request.method === 'GET') {
       const rec = await readSlicing(env);
@@ -322,9 +331,14 @@ async function handleSlice(request, env) {
     if (!TICKET_PATTERN.test(request.headers.get('x-slice-ticket') ?? '')) {
       return refuse(400, 'This page is out of date. Reload the page, then press Slice again.', { reload: true });
     }
+    // Wrong-guess lockout (src/lockout.js): a locked address is refused WITHOUT comparing.
+    const lock = await lockout(env, 'phrase', request);
+    if (lock.locked) return lock.response(json);
     if (!(await constantTimeEquals(normalizePhrase(request.headers.get('x-class-phrase')), open.phrase))) {
+      await lock.wrong();
       return json(403, { error: 'phrase', message: "That class phrase is not right. Check the board and type it again." });
     }
+    await lock.right();
   }
   let form;
   try {

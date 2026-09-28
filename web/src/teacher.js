@@ -64,8 +64,14 @@ async function api(method, body) {
   }
   const j = await r.json().catch(() => ({}));
   if (r.status === 401) throw new Error('That teacher key was refused. Check it and try again.');
+  if (r.status === 429 && j.error === 'locked') throw new Error(lockedMessage(j));
   if (!r.ok) throw new Error(j.message ?? `Something went wrong (${r.status}).`);
   return j;
+}
+
+// Too many wrong keys from this network: the server waits before it checks keys again.
+function lockedMessage(j) {
+  return j.message ?? `Too many wrong tries. Wait ${j.retryAfter ?? 5} seconds and try again.`;
 }
 
 // ---- The settings table ---------------------------------------------------------------------------
@@ -193,7 +199,8 @@ $('#warmup').addEventListener('click', async () => {
   try {
     const r = await fetch('/api/teacher/warmup', { method: 'POST', headers: { 'x-teacher-key': keyInput.value.trim() } });
     const j = await r.json().catch(() => ({}));
-    $('#warmStatus').textContent = r.ok ? `Ready (${j.engine ?? 'slicer'}, answered in ${j.seconds} s).` : (j.message ?? `Not ready (${r.status}).`);
+    $('#warmStatus').textContent = r.ok ? `Ready (${j.engine ?? 'slicer'}, answered in ${j.seconds} s).`
+      : r.status === 429 && j.error === 'locked' ? lockedMessage(j) : (j.message ?? `Not ready (${r.status}).`);
   } catch {
     $('#warmStatus').textContent = 'Could not reach the server.';
   }
@@ -208,6 +215,7 @@ async function slicingApi(method, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const j = await r.json().catch(() => ({}));
+  if (r.status === 429 && j.error === 'locked') throw new Error(lockedMessage(j));
   if (!r.ok) throw new Error(j.message ?? `Something went wrong (${r.status}).`);
   return j;
 }
