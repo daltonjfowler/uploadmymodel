@@ -1309,11 +1309,6 @@ setInterval(() => {
   });
 }, 120_000);
 
-// The settings card stops above the action card, however tall that is right now.
-new ResizeObserver(() => {
-  $('#stage').style.setProperty('--action-h', `${$('#action').offsetHeight + 12}px`);
-}).observe($('#action'));
-
 plateChanged();
 viewer.setGizmo(tool === 'rotate' ? 'rotate' : null);
 renderTools();

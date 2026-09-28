@@ -69,8 +69,12 @@
       </div>
     </div>
 
-    <aside id="settings" class="settings card" aria-label="Print settings"></aside>
-    <aside id="previewCard" class="settings card preview-card" aria-label="Layer preview" hidden></aside>
+    <!-- One right-hand column: settings on top, Slice below, so neither can cover the other. -->
+    <div class="right-col">
+      <aside id="settings" class="settings card" aria-label="Print settings"></aside>
+      <aside id="previewCard" class="settings card preview-card" aria-label="Layer preview" hidden></aside>
+      <section id="action" class="action card" aria-live="polite" aria-label="Slice and save" tabindex="0"></section>
+    </div>
 
     <div class="bottom-left">
       <section id="objects" class="objects card" hidden>
@@ -93,8 +97,6 @@
         <button type="button" data-view="frame" title="Zoom to the selected model (F)">⌖</button>
       </div>
     </div>
-
-    <section id="action" class="action card" aria-live="polite"></section>
 
     <div id="hint" class="hint" hidden role="tooltip"></div>
     <div id="toasts" class="toasts" aria-live="polite"></div>
