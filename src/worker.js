@@ -17,6 +17,7 @@ import {
   DEFAULT_CLASS_CONFIG, LIMITS, PRINTER, checkAgainstClass, formatMinutes, gcodeFileName, safeNamePart, summarize,
   toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
+import { armAgainstClass, armIsUsed, toArmOverrides, validateArm } from '../shared/arm.js';
 import { MAX_PHRASE, MIN_PHRASE, generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
 import { TICKET_PATTERN } from './line.js';
 import { lockout } from './lockout.js';
@@ -170,6 +171,22 @@ async function teacherRefusal(request, env) {
   }
   await new Promise((r) => setTimeout(r, TEACHER_REJECT_DELAY_MS));
   return json(401, { error: 'key', message: 'Wrong teacher key.' });
+}
+
+// The "Assistant to the Regional Manager" password (ARM_KEY secret; header x-arm-key). Its own
+// per-device lockout ('arm'), checked before the compare, like the teacher key. null = right.
+async function armKeyRefusal(request, env) {
+  const expected = env.ARM_KEY ?? '';
+  if (expected === '') return json(403, { error: 'arm', message: 'The Assistant to the Regional Manager tab is not set up on this site yet.' });
+  const lock = await lockout(env, 'arm', request);
+  if (lock.locked) return lock.response(json);
+  if (await constantTimeEquals(request.headers.get('x-arm-key') ?? '', expected)) {
+    await lock.right();
+    return null;
+  }
+  await lock.wrong();
+  await new Promise((r) => setTimeout(r, TEACHER_REJECT_DELAY_MS));
+  return json(403, { error: 'arm', message: 'That password is not right. Ask your teacher.' });
 }
 
 async function handleTeacher(request, env, url, ctx) {
@@ -363,6 +380,25 @@ async function handleSlice(request, env) {
     return refuse(400, `Your teacher has locked ${locked.join(', ')}. Reload the page to get the class settings.`, { locked });
   }
 
+  // The "Assistant to the Regional Manager" tab (shared/arm.js): more settings and colour-change
+  // pauses, only with its password (the ARM_KEY secret), per-device lockout like the phrase.
+  let armInput = null;
+  try {
+    armInput = JSON.parse(String(form.get('arm') ?? 'null'));
+  } catch {
+    return refuse(400, 'The extra settings could not be read. Reload and try again.');
+  }
+  const arm = validateArm(armInput);
+  if (!arm.ok) return refuse(400, 'Those extra settings are not allowed. Reload the page and try again.', { details: arm.errors });
+  if (armIsUsed(arm.arm)) {
+    const refused = await armKeyRefusal(request, env);
+    if (refused) return refused;
+    const armLocked = armAgainstClass(arm.arm, checked.settings, classConfig);
+    if (armLocked.length) {
+      return refuse(400, `Your teacher has locked the setting that ${armLocked.join(', ')} changes. Set it back to "Profile default".`, { locked: armLocked });
+    }
+  }
+
   const model = form.get('model');
   if (!model || typeof model === 'string') return refuse(400, 'No model was sent.');
   if (model.size > LIMITS.maxUploadBytes) return refuse(413, `That plate is too big (the most is ${LIMITS.maxUploadBytes / 1048576} MB).`);
@@ -379,7 +415,7 @@ async function handleSlice(request, env) {
     if (tooFast) return tooFast;
     const meshName = safeNamePart(form.get('modelName'), 'plate', LIMITS.maxFileNameLength);
     return sliceWithEngine(send, stlBytes, checked.settings, {
-      fileName, maxPrintMinutes: classConfig.maxPrintMinutes, meshName, ticket: request.headers.get('x-slice-ticket'), env,
+      arm: arm.arm, fileName, maxPrintMinutes: classConfig.maxPrintMinutes, meshName, ticket: request.headers.get('x-slice-ticket'), env,
     });
   }
 
@@ -394,18 +430,16 @@ async function handleSlice(request, env) {
   });
 }
 
-async function sliceWithEngine(send, stlBytes, settings, { fileName, maxPrintMinutes = 0, meshName = 'plate', ticket = null, env }) {
+async function sliceWithEngine(send, stlBytes, settings, { arm = null, fileName, maxPrintMinutes = 0, meshName = 'plate', ticket = null, env }) {
   let res;
+  const headers = {
+    'content-type': 'model/stl',
+    'x-cura-settings': JSON.stringify({ ...toCuraOverrides(settings), ...toArmOverrides(arm, settings) }),
+    'x-model-name': meshName, // written into the G-code as ";MESH:<name>.stl", like Cura
+  };
+  if (arm?.pauses?.length) headers['x-pauses'] = JSON.stringify(arm.pauses);
   try {
-    res = await send('/slice', {
-      method: 'POST',
-      body: stlBytes,
-      headers: {
-        'content-type': 'model/stl',
-        'x-cura-settings': JSON.stringify(toCuraOverrides(settings)),
-        'x-model-name': meshName, // written into the G-code as ";MESH:<name>.stl", like Cura
-      },
-    }, { ticket });
+    res = await send('/slice', { method: 'POST', body: stlBytes, headers }, { ticket });
   } catch (err) {
     // From the line in front of the slicer (src/line.js sliceThroughLine).
     if (err?.code === 'full') return refuse(503, 'The line for the slicer is very long right now. Wait a few minutes and try again.');
@@ -423,6 +457,10 @@ async function sliceWithEngine(send, stlBytes, settings, { fileName, maxPrintMin
     // container/server.py SLICE_BUDGET_S ran out.
     if (/took too long/.test(detail)) {
       return refuse(502, 'This plate takes too long to slice. Try fewer models on the plate, Fast quality, or supports off if it does not need them.');
+    }
+    // container/server.py outside_build_volume: a brim, mold or skirt would reach past the bed.
+    if (/"outside"/.test(detail)) {
+      return refuse(400, 'Your print (with its brim, skirt or mold) would go past the edge of the bed. Move it toward the middle, or pick a narrower brim.');
     }
     return refuse(502, 'The slicer could not slice this model. Check it in the 3D view, or ask your teacher.');
   }
@@ -453,6 +491,8 @@ async function sliceWithEngine(send, stlBytes, settings, { fileName, maxPrintMin
       'cache-control': 'no-store',
       // Headers are Latin-1 only; "·" and friends go URL-encoded (the page decodes them).
       'x-print-summary': encodeURIComponent(summary),
+      // "5@25,12.5@60": the colour-change pauses the slicer put in (height mm @ layer).
+      'x-pauses-done': res.headers.get('x-pauses-done') ?? '',
     },
   });
 }
@@ -480,6 +520,13 @@ async function handleApi(request, env, url, ctx) {
   }
   // Everything under /api/teacher/ needs the key, even paths that do not exist.
   if (url.pathname.startsWith('/api/teacher/')) return handleTeacher(request, env, url, ctx);
+  // Unlocking the "Assistant to the Regional Manager" tab: is this password right? (The slice
+  // checks it again; this only opens the tab.) Counts per IP like any API call, plus its lockout.
+  if (url.pathname === '/api/arm') {
+    if (request.method !== 'POST') return json(405, { error: 'method', message: 'Use POST.' });
+    if (await overLimit(env.API_RATE_IP, request)) return json(429, { error: 'busy', message: 'Too many requests from your network. Wait a minute and try again.' });
+    return (await armKeyRefusal(request, env)) ?? json(200, { ok: true });
+  }
   // Your place in the line for the slicer (src/line.js). Asked every 2 s while a slice waits or
   // runs; it only reaches the line's Durable Object, never a container, and not even that while
   // slicing is closed (students still waiting then lose their place and are told it closed).

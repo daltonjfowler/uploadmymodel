@@ -46,7 +46,7 @@ RUN /opt/curaengine/CuraEngine help 2>&1 | grep -q "Cura_SteamEngine version 4.1
 WORKDIR /app
 COPY engine/resolve.py engine/run.py engine/test_resolve.py /app/engine/
 COPY engine/reference /app/engine/reference
-COPY container/server.py /app/
+COPY container/server.py container/pause.py container/arm_values.json /app/
 # The AppImage's own 4.13.2 files must resolve to exactly the checked reference, or stop here.
 RUN python /app/engine/test_resolve.py
 # A non-root user for the service (the AppImage's folders were root-only; made readable above).

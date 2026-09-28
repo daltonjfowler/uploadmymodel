@@ -1,0 +1,94 @@
+{
+ "magic_fuzzy_skin_enabled": [
+  true
+ ],
+ "magic_fuzzy_skin_thickness": [
+  0.15,
+  0.5
+ ],
+ "ironing_enabled": [
+  true
+ ],
+ "ironing_only_highest_layer": [
+  true
+ ],
+ "top_bottom_pattern": [
+  "concentric",
+  "zigzag"
+ ],
+ "skin_monotonic": [
+  true
+ ],
+ "z_seam_type": [
+  "back",
+  "random",
+  "shortest"
+ ],
+ "adaptive_layer_height_enabled": [
+  true
+ ],
+ "hole_xy_offset": [
+  0.2,
+  0.4,
+  -0.2
+ ],
+ "xy_offset": [
+  0.1,
+  -0.1
+ ],
+ "wall_line_count": [
+  1,
+  5,
+  6
+ ],
+ "top_thickness": [
+  0.8,
+  2,
+  3
+ ],
+ "bottom_thickness": [
+  0.8,
+  2,
+  3
+ ],
+ "infill_pattern": [
+  "concentric",
+  "zigzag",
+  "cross",
+  "cross_3d",
+  "quarter_cubic",
+  "tetrahedral",
+  "cubicsubdiv"
+ ],
+ "gradual_infill_steps": [
+  2,
+  4
+ ],
+ "magic_spiralize": [
+  true
+ ],
+ "mold_enabled": [
+  true
+ ],
+ "conical_overhang_enabled": [
+  true
+ ],
+ "support_tree_angle": [
+  25,
+  55
+ ],
+ "support_tree_branch_diameter": [
+  1.5,
+  3
+ ],
+ "brim_line_count": [
+  8,
+  24,
+  40
+ ],
+ "skirt_line_count": [
+  1,
+  3,
+  5
+ ]
+}

@@ -25,7 +25,10 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "engine"))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "engine"))
+sys.path.insert(0, HERE)
+import pause  # noqa: E402
 import resolve  # noqa: E402
 import run  # noqa: E402
 
@@ -56,6 +59,14 @@ NUMBERS = {
     "support_angle": (40, 80, 5),
 }
 BOOLS = {"support_enable"}
+# The "Assistant to the Regional Manager" tab: optional extra keys and the only values each may take
+# (written from shared/arm.js by scripts/arm-values.mjs; test/arm.test.mjs keeps them equal). A key
+# the base list also has (wall_line_count, infill_pattern) may take either list's values.
+with open(os.path.join(HERE, "arm_values.json"), encoding="utf-8") as _f:
+    ARM_VALUES = json.load(_f)
+# Everything the printer does must stay inside the build volume (a huge brim or a mold near the
+# edge could reach past it): checked on every G0/G1 of the layers before the file goes out.
+BED_Z = 285.0
 
 lock = threading.Lock()
 _help = subprocess.run([run.ENGINE, "help"], capture_output=True, text=True)
@@ -78,25 +89,67 @@ def check_settings(raw):
     if not isinstance(s, dict):
         raise Refused(400, "settings must be an object")
     expected = set(CHOICES) | set(NUMBERS) | BOOLS | {"quality_type"}
-    if set(s) != expected:
-        raise Refused(400, f"settings keys must be exactly {sorted(expected)}")
+    if not expected <= set(s) or not set(s) <= expected | set(ARM_VALUES):
+        raise Refused(400, f"settings keys must be {sorted(expected)} plus only these extras: {sorted(ARM_VALUES)}")
     if s["quality_type"] not in QUALITY:
         raise Refused(400, "quality_type")
     user = {}
-    for k, allowed in CHOICES.items():
-        if s[k] not in allowed:
+    for k, v in s.items():
+        if k == "quality_type":
+            continue
+        if arm_value_ok(k, v):
+            user[k] = cura_string(v)
+        elif k in CHOICES and v in CHOICES[k]:
+            user[k] = v
+        elif k in NUMBERS and isinstance(v, int) and not isinstance(v, bool) and _in_range(v, *NUMBERS[k]):
+            user[k] = str(v)
+        elif k in BOOLS and isinstance(v, bool):
+            user[k] = cura_string(v)
+        else:
             raise Refused(400, k)
-        user[k] = s[k]
-    for k, (lo, hi, step) in NUMBERS.items():
-        v = s[k]
-        if not isinstance(v, int) or isinstance(v, bool) or not lo <= v <= hi or (v - lo) % step:
-            raise Refused(400, k)
-        user[k] = str(v)
-    for k in BOOLS:
-        if not isinstance(s[k], bool):
-            raise Refused(400, k)
-        user[k] = "True" if s[k] else "False"
     return QUALITY[s["quality_type"]], user
+
+
+def _in_range(v, lo, hi, step):
+    return lo <= v <= hi and (v - lo) % step == 0
+
+
+def _same(a, b):
+    # True == 1 in Python: a bool only matches a bool, a number only a number.
+    if isinstance(a, bool) or isinstance(b, bool):
+        return isinstance(a, bool) and isinstance(b, bool) and a == b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(a - b) < 1e-9
+    return type(a) is type(b) and a == b
+
+
+def arm_value_ok(k, v):
+    return any(_same(v, a) for a in ARM_VALUES.get(k, []))
+
+
+def cura_string(v):
+    if isinstance(v, bool):
+        return "True" if v else "False"
+    return str(v)
+
+
+MOVE_LINE = re.compile(rb"^G[01]\b[^;\n]*", re.M)
+AXIS = {axis: re.compile(rb"\b" + axis + rb"(-?\d+(?:\.\d+)?)") for axis in (b"X", b"Y", b"Z")}
+
+
+def outside_build_volume(gcode):
+    """The first move of the layers that leaves 0..280 x 0..280 x 0..285 mm, or None."""
+    first = gcode.find(b"\n;LAYER:")
+    last = gcode.rfind(b"\n;TIME_ELAPSED:")
+    if first < 0 or last < first:
+        return None
+    for m in MOVE_LINE.finditer(gcode, first, last):
+        line = m.group(0)
+        for axis, hi in ((b"X", BED_X), (b"Y", BED_Y), (b"Z", BED_Z)):
+            p = AXIS[axis].search(line)
+            if p and not -0.001 <= float(p.group(1)) <= hi + 0.001:
+                return line.decode(errors="replace")
+    return None
 
 
 def centred_stl(data):
@@ -202,6 +255,10 @@ class Handler(BaseHTTPRequestHandler):
             if length > MAX_BODY:
                 raise Refused(413, "model too big")
             quality, user = check_settings(self.headers.get("x-cura-settings"))
+            try:
+                pauses = pause.check_pauses(self.headers.get("x-pauses"))
+            except ValueError as e:
+                raise Refused(400, str(e))
             t0 = time.time()
             timings = {}
             stl = centred_stl(self.rfile.read(length))
@@ -215,6 +272,11 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 lock.release()
             header = res["header"] or ""
+            bad = outside_build_volume(gcode)
+            if bad:
+                print(json.dumps({"message": "outside the build volume", "move": bad[:80]}), flush=True)
+                raise Refused(400, "outside")
+            gcode, paused = pause.add_pauses(gcode, pauses)
             time_s = re.search(r";TIME:(\d+)", header)
             metres = re.search(r";Filament used: ([0-9.]+)m", header)
             layers = len(re.findall(rb"^;LAYER:\d+", gcode, re.M))
@@ -227,6 +289,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("x-layers", str(layers))
             self.send_header("x-engine-seconds", f"{time.time() - t0:.1f}")
             self.send_header("x-attempts", str(attempts))
+            self.send_header("x-pauses-done", ",".join(f"{h:g}@{layer}" for h, layer, _z in paused))
             self.send_header("x-timings", ";".join(f"{k}={v:.2f}" for k, v in timings.items()))
             self.end_headers()
             self.wfile.write(gcode)

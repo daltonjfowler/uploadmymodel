@@ -88,6 +88,12 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   several steps), so Undo works. Never move, scale or turn a model's mesh directly from `main.js`.
 - Overhang red uses the student's support overhang angle (`supportAngle`, class default 60°, LulzBot's
   Cura value), so red always means "will get support". The slider repaints live via 'preview' events.
+- The third settings tab, "Assistant to the Regional Manager" (shared/arm.js), unlocks with the
+  ARM_KEY Worker secret (never in this public repo). Its list is checked in the page, the Worker and
+  the container (container/arm_values.json from scripts/arm-values.mjs; test/arm.test.mjs keeps them
+  equal). Never add temperatures, speeds, flow, cooling, retraction, travel or G-code to it. Colour
+  change pauses: container/pause.py (Cura LE's Marlin M0 pause, park X190 Y190). The container refuses
+  any file that moves outside 280 x 280 x 285 mm. Real-engine check: node container/test-arm.mjs.
 - Use this app's own KV namespace when one is added. Never reuse uploadmycode's or uploadmylaser's.
 
 ## Commands

@@ -51,7 +51,9 @@ button.linkbtn:hover:not(:disabled) { color: var(--accent); background: none; }
   background: var(--top); border-bottom: 1px solid var(--line); position: relative; z-index: 5;
 }
 .brand { font-size: 1.15rem; font-weight: 700; letter-spacing: -.01em; display: inline-flex; align-items: center; gap: 10px; }
-.brand img { border-radius: 8px; }
+.brand img { border-radius: 16px; }
+/* Dalton 2026-09-28: the robot at 72 px (was 36). Phones get 56 px, like the other three sites. */
+@media (max-width: 640px) { .brand img { width: 56px; height: 56px; border-radius: 12px; } }
 .stages { display: flex; gap: 2px; background: var(--card2); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
 .stage {
   border: 0; background: none; border-radius: 6px; padding: 5px 14px; font-weight: 650; font-size: .8rem;
@@ -170,6 +172,23 @@ button.linkbtn:hover:not(:disabled) { color: var(--accent); background: none; }
 .seg button.on { background: var(--card); color: var(--ink); box-shadow: var(--shadow); }
 .seg button:hover:not(.on) { background: var(--card); }
 .seg.tabs { margin: 0 12px 8px; }
+/* Recommended | Custom | Assistant to the Regional Manager: the long one gets more room and wraps. */
+.seg.tabs.three { grid-auto-flow: row; grid-template-columns: 1fr 1fr 1.7fr; align-items: stretch; }
+.seg.tabs.three button { font-size: .8rem; line-height: 1.15; white-space: normal; padding: 5px 4px; }
+.seg.tabs .arm-tab { font-size: .72rem !important; }
+.arm-lock { display: grid; gap: 8px; }
+.arm-lock p { margin: 0; }
+.arm-lock-row { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+.arm-lock-row input { min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.arm-intro { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.arm-intro .note { margin: 0; }
+.arm-intro .linkbtn { white-space: nowrap; }
+.cat-rows > .note { margin: 6px 10px; }
+.arm-off { opacity: .6; }
+.arm-why { margin: 2px 10px 6px; }
+.pause-ctl { display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
+.pause-ctl input { width: 72px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+.pause-ctl .unit { color: var(--muted); font-size: .85rem; }
 .seg.placement button, .seg.adhesion button { font-size: .85rem; padding: 6px 4px; }
 .seg.placement button.on, .seg.adhesion button.on { outline: 2px solid var(--accent); outline-offset: -2px; }
 .sub-setting { display: grid; gap: 2px; }

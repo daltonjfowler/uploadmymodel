@@ -792,7 +792,7 @@ function renderAction() {
     card.append(r);
   } else if (slice.state === 'done' && slice.download) {
     const r = el('div', { class: 'result ok' });
-    r.innerHTML = `<strong>✓ Ready for the SD card</strong>${slice.stats ? `<p>${esc(slice.stats)}</p>` : ''}`;
+    r.innerHTML = `<strong>✓ Ready for the SD card</strong>${slice.stats ? `<p>${esc(slice.stats)}</p>` : ''}${slice.pauses?.text ? `<p>🎨 ${esc(slice.pauses.text)}</p>` : ''}`;
     card.append(r);
     const save = el('button', { type: 'button', class: 'primary big wide' }, '💾 Save to SD card');
     save.addEventListener('click', () => downloadResult());
@@ -911,6 +911,45 @@ async function copyToPrinter() {
   renderAction();
 }
 
+// A random id for this browser: the slicer's fair-use limit and the wrong-guess lockout count per
+// device (a school shares one IP). No storage: the server falls back to the IP.
+function browserId() {
+  try {
+    let id = localStorage.getItem('umm.client') ?? '';
+    if (!id) localStorage.setItem('umm.client', (id = crypto.randomUUID()));
+    return id;
+  } catch {
+    return '';
+  }
+}
+
+/** "5@25,12.5@60" from the slicer -> words for the result card. */
+function pausesDone(header, asked) {
+  const done = String(header ?? '').split(',').filter(Boolean).map((p) => p.split('@').map(Number));
+  if (!asked.length) return null;
+  const list = done.map(([h, layer]) => `${fmt(h)} mm (layer ${layer})`).join(', ');
+  const skipped = asked.length - done.length;
+  let text = done.length ? `Colour change pause${done.length === 1 ? '' : 's'} at ${list}. The printer waits for the knob there.` : '';
+  if (skipped > 0) text += `${text ? ' ' : ''}${skipped === 1 ? 'One pause is' : `${skipped} pauses are`} above the top of your model, so ${skipped === 1 ? 'it was' : 'they were'} left out.`;
+  return { done, text };
+}
+
+// Unlocking the third settings tab: the server checks the password (and counts wrong ones).
+panel.addEventListener('armunlock', async (e) => {
+  const { key, done } = e.detail;
+  try {
+    const res = await fetch('/api/arm', { method: 'POST', headers: { 'x-arm-key': key, 'x-client-id': browserId() } });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      done();
+      panel.unlockArm(key);
+      toast('Assistant to the Regional Manager tab unlocked.', { kind: 'info' });
+    } else done(body.message ?? `Something went wrong (${res.status}).`);
+  } catch {
+    done('Could not reach the server. Check the Wi-Fi and try again.');
+  }
+});
+
 function invalidateSlice() {
   if (usb.state === 'working') return; // never drop the file in the middle of a copy
   usb = { state: 'idle' };
@@ -933,12 +972,10 @@ async function runSlice() {
   form.append('name', studentName());
   form.append('modelName', plateName());
   form.append('fileName', customFileName);
-  // A random id for this browser, only for the slicer's fair-use limit (a school shares one IP).
-  let clientId = '';
-  try {
-    clientId = localStorage.getItem('umm.client') ?? '';
-    if (!clientId) localStorage.setItem('umm.client', (clientId = crypto.randomUUID()));
-  } catch { /* no storage: the server falls back to the IP */ }
+  const clientId = browserId();
+  // The "Assistant to the Regional Manager" tab: its extras and password, only when it changes something.
+  const arm = panel.armValue;
+  if (arm) form.append('arm', JSON.stringify(arm));
   // The class gate (only when this site has a slicer).
   await refreshSlicing();
   let phrase = '';
@@ -961,6 +998,7 @@ async function runSlice() {
     const headers = { 'x-slice-ticket': ticket };
     if (clientId) headers['x-client-id'] = clientId;
     if (phrase) headers['x-class-phrase'] = phrase;
+    if (arm) headers['x-arm-key'] = panel.armKey;
     const res = await fetch('/api/slice', { method: 'POST', body: form, signal: sliceAbort.signal, headers });
     const type = res.headers.get('content-type') ?? '';
     if (res.ok && !type.includes('json')) {
@@ -968,7 +1006,10 @@ async function runSlice() {
       const blob = await res.blob();
       const cd = res.headers.get('content-disposition') ?? '';
       const name = /filename="([^"]+)"/.exec(cd)?.[1] ?? fileName();
-      slice = { state: 'done', download: true, blob, url: URL.createObjectURL(blob), fileName: name, stats: decodeURIComponent(res.headers.get('x-print-summary') ?? '') };
+      slice = {
+        state: 'done', download: true, blob, url: URL.createObjectURL(blob), fileName: name, stats: decodeURIComponent(res.headers.get('x-print-summary') ?? ''),
+        pauses: pausesDone(res.headers.get('x-pauses-done'), arm?.pauses ?? []),
+      };
       try {
         const parsed = parseGcode(await blob.text());
         if (parsed.layers.length) showGcode(parsed, { kind: 'slice', name });
@@ -992,6 +1033,9 @@ async function runSlice() {
         // Too many wrong phrases from this browser: the server did not even check this one, so
         // keep the stored phrase and do not ask again (no loop). The student waits and presses Slice.
         slice = { state: 'error', message: body.message ?? `Too many wrong tries. Wait ${body.retryAfter ?? 5} seconds and try again.` };
+      } else if (res.status === 403 && body.error === 'arm') {
+        panel.lockArm(); // wrong or changed password: ask again next time
+        slice = { state: 'error', message: body.message };
       } else if (res.status === 403 && body.error === 'closed') {
         await refreshSlicing();
         slice = { state: 'error', message: body.message };

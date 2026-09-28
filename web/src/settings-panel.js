@@ -7,6 +7,7 @@ import {
   SUPPORT_CHOICES, TREE_SUPPORT_INFILL, applyClassLocks, isClassDefault, qualityById, summarize,
   validateClassConfig, validateSettings,
 } from '../../shared/settings.js';
+import { ARM_LABEL, ARM_PAUSES, ARM_SECTIONS, ARM_SETTINGS, activeArm, armIsUsed, summarizeArm, validateArm } from '../../shared/arm.js';
 import { el, esc } from './dom.js';
 import { patternIcon } from './pattern-icons.js';
 
@@ -15,6 +16,10 @@ import { patternIcon } from './pattern-icons.js';
 const STORE_SETTINGS = 'umm.mySettings';
 const STORE_MODE = 'umm.settingsMode';
 const STORE_OPEN = 'umm.settingsOpen';
+// The third tab's choices (kept like the others) and its password (this tab only: sessionStorage,
+// so a shared Chromebook forgets it when the tab closes).
+const STORE_ARM = 'umm.myArm';
+const STORE_ARM_KEY = 'umm.armKey';
 // Support advice thresholds, mm² of red (faces needing support) on the plate: under `none` counts
 // as nothing (specks), under `tiny` prints fine without supports (a small tip, the top of a hole),
 // from `lots` on, turning the model is worth a try.
@@ -76,7 +81,17 @@ export class SettingsPanel extends EventTarget {
     this.mine = stored.ok ? Object.fromEntries(Object.keys(raw).filter((k) => k in stored.settings).map((k) => [k, stored.settings[k]])) : {};
     this.settings = applyClassLocks({ ...this.config.defaults, ...this.mine }, this.config);
     if (this.settings.support !== 'none') this.lastPlacement = this.settings.support;
-    this.mode = load(STORE_MODE, 'recommended') === 'custom' ? 'custom' : 'recommended';
+    const armStored = validateArm(load(STORE_ARM, null));
+    this.arm = armStored.ok ? armStored.arm : { settings: {}, pauses: [] };
+    try {
+      this.armKey = sessionStorage.getItem(STORE_ARM_KEY) ?? '';
+    } catch {
+      this.armKey = '';
+    }
+    const mode = load(STORE_MODE, 'recommended');
+    this.mode = ['custom', 'arm'].includes(mode) ? mode : 'recommended';
+    if (this.mode === 'arm' && !this.armKey) this.mode = 'custom';
+    this.openArmSections = new Set(['pauses', 'looks']);
     this.open = load(STORE_OPEN, true) !== false;
     this.openSections = new Set(['quality', 'infill', 'support']);
     this.overhangs = 0; // mm² of red faces on the plate, from the viewer
@@ -86,6 +101,43 @@ export class SettingsPanel extends EventTarget {
 
   get value() {
     return { ...this.settings };
+  }
+
+  /** The third tab's part of a slice, or null when it is locked or changes nothing. */
+  get armValue() {
+    return this.armKey && armIsUsed(this.arm) ? { settings: { ...this.arm.settings }, pauses: [...this.arm.pauses] } : null;
+  }
+
+  setArm(next) {
+    const v = validateArm(next);
+    if (!v.ok) return;
+    this.arm = v.arm;
+    save(STORE_ARM, this.arm);
+    this.render();
+    this.dispatchEvent(new Event('change'));
+  }
+
+  /** The password was right (the page checked it with /api/arm): open the tab. */
+  unlockArm(key) {
+    this.armKey = key;
+    try {
+      sessionStorage.setItem(STORE_ARM_KEY, key);
+    } catch { /* fine: open for this page only */ }
+    this.mode = 'arm';
+    save(STORE_MODE, 'arm');
+    this.render();
+    this.dispatchEvent(new Event('change'));
+  }
+
+  /** Close the tab again (a wrong or changed password, or the student pressed Lock). */
+  lockArm() {
+    this.armKey = '';
+    try {
+      sessionStorage.removeItem(STORE_ARM_KEY);
+    } catch { /* fine */ }
+    if (this.mode === 'arm') this.mode = 'custom';
+    this.render();
+    this.dispatchEvent(new Event('change'));
   }
 
   set(id, value) {
@@ -128,7 +180,9 @@ export class SettingsPanel extends EventTarget {
   reset() {
     this.settings = { ...this.config.defaults };
     this.mine = {};
+    this.arm = { settings: {}, pauses: [] };
     save(STORE_SETTINGS, this.mine);
+    save(STORE_ARM, this.arm);
     this.render();
     this.dispatchEvent(new Event('change'));
   }
@@ -154,7 +208,9 @@ export class SettingsPanel extends EventTarget {
     // next arrow key would go to the page (and move the model) instead of the slider.
     const active = this.root.contains(document.activeElement) ? document.activeElement : null;
     const focusKey = active ? `${active.tagName}|${active.getAttribute('aria-label') ?? active.textContent.trim()}` : null;
-    const changed = !isClassDefault(this.settings, this.config.defaults);
+    const armOn = !!this.armValue;
+    const changed = !isClassDefault(this.settings, this.config.defaults) || armOn;
+    const armWords = armOn ? summarizeArm(this.arm, this.settings) : '';
     this.root.classList.toggle('collapsed', !this.open);
     clearTimeout(this.hintTimer);
     this.hint.hidden = true; // its target is about to be replaced
@@ -165,7 +221,7 @@ export class SettingsPanel extends EventTarget {
       <span class="settings-icon" aria-hidden="true">⚙</span>
       <span class="settings-title">
         <strong>Print settings</strong>
-        <span class="settings-summary">${esc(summarize(this.settings))}</span>
+        <span class="settings-summary">${esc(summarize(this.settings))}${armWords ? ` · ${esc(armWords)}` : ''}</span>
       </span>
       <span class="profile-tag ${changed ? 'changed' : ''}">${changed ? 'Changed' : 'Class settings'}</span>
       <span class="chev" aria-hidden="true">${this.open ? '▴' : '▾'}</span>`;
@@ -177,12 +233,14 @@ export class SettingsPanel extends EventTarget {
     this.root.append(header);
     if (!this.open) return;
 
-    const tabs = el('div', { class: 'seg tabs', role: 'tablist' });
-    for (const [id, label] of [['recommended', 'Recommended'], ['custom', 'Custom']]) {
-      const b = el('button', { type: 'button', role: 'tab', class: this.mode === id ? 'on' : '', 'aria-selected': String(this.mode === id) }, label);
+    const tabs = el('div', { class: 'seg tabs three', role: 'tablist' });
+    for (const [id, label] of [['recommended', 'Recommended'], ['custom', 'Custom'], ['arm', ARM_LABEL]]) {
+      const on = this.mode === id || (id === 'arm' && this.mode === 'arm-lock');
+      const text = id === 'arm' && !this.armKey ? `🔒 ${label}` : label;
+      const b = el('button', { type: 'button', role: 'tab', class: `${on ? 'on' : ''} ${id === 'arm' ? 'arm-tab' : ''}`.trim(), 'aria-selected': String(on) }, text);
       b.addEventListener('click', () => {
-        this.mode = id;
-        save(STORE_MODE, id);
+        this.mode = id === 'arm' && !this.armKey ? 'arm-lock' : id;
+        if (this.mode !== 'arm-lock') save(STORE_MODE, id);
         this.render();
       });
       tabs.append(b);
@@ -196,6 +254,8 @@ export class SettingsPanel extends EventTarget {
       body.append(note);
     }
     if (this.mode === 'recommended') this.renderRecommended(body);
+    else if (this.mode === 'arm-lock') this.renderArmLock(body);
+    else if (this.mode === 'arm') this.renderArm(body);
     else this.renderCustom(body);
     this.root.append(body);
 
@@ -299,6 +359,132 @@ export class SettingsPanel extends EventTarget {
     }
     locked.append(rows);
     body.append(locked);
+  }
+
+  // ---- "Assistant to the Regional Manager" ---------------------------------------------------
+
+  renderArmLock(body) {
+    const box = el('form', { class: 'arm-lock' });
+    box.append(el('p', {}, 'Extra settings for printing experts: colour changes, fuzzy skin, vase mode, molds and more. Ask your teacher for the password.'));
+    const input = el('input', { type: 'password', autocomplete: 'off', 'aria-label': `${ARM_LABEL} password`, placeholder: 'Password' });
+    const go = el('button', { type: 'submit', class: 'primary' }, 'Unlock');
+    const msg = el('p', { class: 'note arm-msg', role: 'status' });
+    const row = el('div', { class: 'arm-lock-row' });
+    row.append(input, go);
+    box.append(row, msg);
+    box.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!input.value) return;
+      go.disabled = true;
+      msg.textContent = 'Checking…';
+      this.dispatchEvent(new CustomEvent('armunlock', {
+        detail: {
+          key: input.value,
+          done: (err) => {
+            go.disabled = false;
+            msg.textContent = err ?? '';
+          },
+        },
+      }));
+    });
+    body.append(box);
+    setTimeout(() => input.focus({ preventScroll: true }), 0);
+  }
+
+  renderArm(body) {
+    const intro = el('div', { class: 'arm-intro' });
+    intro.append(el('p', { class: 'note' }, 'Temperatures and speeds stay locked, so nothing here can hurt the printer. Everything starts at the profile default.'));
+    const lockBtn = el('button', { type: 'button', class: 'linkbtn' }, '🔒 Lock this tab');
+    lockBtn.addEventListener('click', () => this.lockArm());
+    intro.append(lockBtn);
+    body.append(intro);
+    const active = activeArm(this.arm, this.settings);
+    for (const sec of ARM_SECTIONS) {
+      const open = this.openArmSections.has(sec.id);
+      const wrap = el('section', { class: `cat ${open ? 'open' : ''}` });
+      const head = el('button', { type: 'button', class: 'cat-head', 'aria-expanded': String(open) });
+      head.innerHTML = `<span class="cat-icon" aria-hidden="true">${sec.icon}</span><span>${esc(sec.label)}</span><span class="chev" aria-hidden="true">${open ? '▴' : '▾'}</span>`;
+      head.addEventListener('click', () => {
+        if (open) this.openArmSections.delete(sec.id);
+        else this.openArmSections.add(sec.id);
+        this.render();
+      });
+      wrap.append(head);
+      if (open) {
+        const rows = el('div', { class: 'cat-rows' });
+        if (sec.id === 'pauses') this.pauseRows(rows);
+        for (const def of ARM_SETTINGS.filter((d) => d.section === sec.id)) rows.append(this.armRow(def, active));
+        wrap.append(rows);
+      }
+      body.append(wrap);
+    }
+    if (armIsUsed(this.arm)) {
+      const clear = el('button', { type: 'button', class: 'linkbtn' }, '↺ Set every extra back to the profile');
+      clear.addEventListener('click', () => this.setArm({ settings: {}, pauses: [] }));
+      body.append(clear);
+    }
+  }
+
+  armRow(def, active) {
+    const value = this.arm.settings[def.id] ?? 'profile';
+    const teacherLocked = !!def.overrides && this.isLocked(def.overrides);
+    let why = '';
+    if (teacherLocked) why = 'Your teacher locked this for the class.';
+    else if (value !== 'profile' && !active[def.id]) {
+      why = def.needs
+        ? `Only works with ${Object.keys(def.needs).map((k) => ARM_SETTINGS.find((d) => d.id === k).label).join(', ')} on.`
+        : def.help;
+    }
+    const row = el('div', { class: `row ${why ? 'arm-off' : ''}`.trim() });
+    row.append(el('span', { class: 'row-label' }, def.label));
+    const select = el('select', { 'aria-label': def.label, disabled: teacherLocked ? '' : null });
+    for (const o of def.options) {
+      const opt = el('option', { value: o.id }, o.label);
+      if (o.id === value) opt.selected = true;
+      select.append(opt);
+    }
+    select.addEventListener('change', () => {
+      const settings = { ...this.arm.settings, [def.id]: select.value };
+      if (select.value === 'profile') delete settings[def.id];
+      this.setArm({ settings, pauses: this.arm.pauses });
+    });
+    row.append(select);
+    const current = def.options.find((o) => o.id === value);
+    this.hintOn(row, def.label, def.help + (current?.blurb ? `\n\n${current.label}: ${current.blurb}` : ''));
+    if (!why) return row;
+    const wrap = el('div', { class: 'arm-row-wrap' });
+    wrap.append(row, el('p', { class: 'note arm-why' }, why));
+    return wrap;
+  }
+
+  pauseRows(rows) {
+    rows.append(el('p', { class: 'note' }, "The printer stops before the first layer above each height. Pull out the old filament, push the new colour in until it comes out of the nozzle, then press the knob to carry on. The Preview tab shows each layer's height."));
+    const pauses = this.arm.pauses;
+    pauses.forEach((h, i) => {
+      const row = el('div', { class: 'row pause-row' });
+      row.append(el('span', { class: 'row-label' }, `Pause ${i + 1} at`));
+      const input = el('input', { type: 'number', min: ARM_PAUSES.minMm, max: ARM_PAUSES.maxMm, step: 0.05, value: h, 'aria-label': `Pause ${i + 1} height in mm` });
+      input.addEventListener('change', () => {
+        const v = Math.round(Number(input.value) * 20) / 20;
+        const next = pauses.map((x, j) => (j === i ? v : x));
+        if (validateArm({ settings: this.arm.settings, pauses: next }).ok) this.setArm({ settings: this.arm.settings, pauses: next });
+        else input.value = h;
+      });
+      const del = el('button', { type: 'button', class: 'linkbtn', 'aria-label': `Remove pause ${i + 1}` }, '✕');
+      del.addEventListener('click', () => this.setArm({ settings: this.arm.settings, pauses: pauses.filter((_, j) => j !== i) }));
+      const ctl = el('span', { class: 'pause-ctl' });
+      ctl.append(input, el('span', { class: 'unit' }, 'mm'), del);
+      row.append(ctl);
+      rows.append(row);
+    });
+    if (pauses.length < ARM_PAUSES.count) {
+      const add = el('button', { type: 'button', class: 'wide' }, pauses.length ? '+ Add another pause' : '+ Add a colour change pause');
+      add.addEventListener('click', () => {
+        const next = Math.min(ARM_PAUSES.maxMm, (pauses.at(-1) ?? 0) + 5);
+        this.setArm({ settings: this.arm.settings, pauses: [...pauses, next] });
+      });
+      rows.append(add);
+    }
   }
 
   extraRows(section, rows, s) {
