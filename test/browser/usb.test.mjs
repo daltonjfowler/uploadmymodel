@@ -1,6 +1,8 @@
-// The printer USB test page against a pretend Marlin printer (Web Serial stubbed). The pretend
-// printer only answers at 115200, so the page must fall back from 250000. Everything the page sends
-// is recorded: it must only ever be the four allowed questions.
+// The printer USB test page against a pretend Marlin printer (Web Serial stubbed). Everything the
+// page sends is recorded: it must only ever be the four allowed questions.
+// Round 1 is the real school Workhorse (2026-09-28): 250000, and it ignores commands for about 4 s
+// while it boots. The page used to ask too early, give up and switch to 115200 (gibberish).
+// Round 2 is a printer that only answers at 115200, so the page must fall back from 250000.
 import { chromium } from 'playwright-core';
 import { BASE, CHROME } from './lib.mjs';
 const base = process.argv[2] || BASE;
@@ -15,6 +17,7 @@ await ctx.addInitScript(() => {
   };
   window.__sent = [];
   window.__bauds = [];
+  window.__printer = { baud: 250000, bootMs: 4000 };
   const makePort = () => {
     let push = null;
     let baud = 0;
@@ -24,17 +27,28 @@ await ctx.addInitScript(() => {
       async open(opts) {
         baud = opts.baudRate;
         window.__bauds.push(baud);
+        const { baud: speaks, bootMs } = window.__printer;
+        const bootedAt = Date.now() + bootMs;
         port.readable = new ReadableStream({ start(c) { push = c; } });
+        const say = (lines) => push.enqueue(new TextEncoder().encode(lines.join('\r\n') + '\r\n'));
         port.writable = new WritableStream({
           write(chunk) {
             const text = new TextDecoder().decode(chunk);
             window.__sent.push(text);
-            if (baud !== 115200) return; // wrong speed: silence
+            if (baud !== speaks) {
+              if (speaks === 250000) push.enqueue(new Uint8Array([0xfe, 0x9c, 0x4e, 0x0b, 0xe8, 0x0d, 0x0a])); // noise
+              return;
+            }
+            if (Date.now() < bootedAt) return; // still booting: Marlin ignores it
             const cmd = text.trim();
-            setTimeout(() => push.enqueue(new TextEncoder().encode((replies[cmd] ?? ['echo:Unknown command', 'ok']).join('\r\n') + '\r\n')), 30);
+            setTimeout(() => say(replies[cmd] ?? ['echo:Unknown command', 'ok']), 30);
           },
         });
-        setTimeout(() => baud === 115200 && push.enqueue(new TextEncoder().encode('start\r\necho: External Reset\r\n')), 50);
+        if (baud === speaks) {
+          setTimeout(() => say(['start', 'Marlin 2.0.9.0.13', 'echo: Last Updated: 2021-06-15 | Author: Lulzbot']), 50);
+          setTimeout(() => say(['echo:DIGIPOTS Loading', 'echo:DIGIPOTS Loaded']), bootMs / 2);
+          setTimeout(() => say(['echo:V83 stored settings retrieved (620 bytes; crc 9087)']), bootMs - 200);
+        }
       },
       async close() { port.readable = null; port.writable = null; },
     };
@@ -47,10 +61,17 @@ const errors = [];
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 const check = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}: ${JSON.stringify(got)}${ok ? '' : ` (want ${JSON.stringify(want)})`}`); if (!ok) process.exitCode = 1; };
 
-const res = await page.goto(base + 'usb-test/');
+let res = await page.goto(base + 'usb-test/');
 check('page allows Web Serial for itself', res.headers()['permissions-policy'].includes('serial=(self)'), true);
 await page.click('#connect');
-await page.waitForSelector('#state[data-tone="ok"]', { timeout: 20000 });
+await page.waitForSelector('#state[data-tone="ok"]', { timeout: 30000 });
+check('Workhorse: waits out the boot at 250000', await page.$eval('#state', (e) => e.textContent), 'Connected at 250000. The printer answered.');
+check('Workhorse: never switched speed', await page.evaluate(() => window.__bauds), [250000]);
+
+res = await page.goto(base + 'usb-test/');
+await page.evaluate(() => { window.__printer = { baud: 115200, bootMs: 300 }; window.__bauds = []; window.__sent = []; });
+await page.click('#connect');
+await page.waitForSelector('#state[data-tone="ok"]', { timeout: 60000 });
 check('fell back to 115200', await page.$eval('#state', (e) => e.textContent), 'Connected at 115200. The printer answered.');
 check('tried 250000 first', await page.evaluate(() => window.__bauds), [250000, 115200]);
 for (const cmd of ['M105', 'M27', 'M20']) {

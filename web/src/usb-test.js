@@ -16,6 +16,8 @@ let reader = null;
 let lines = []; // waiting for the next "ok"
 let waiters = [];
 let buffer = '';
+let lastData = 0; // when bytes last came in
+let heard = [];   // every line since the port opened
 
 function write(text, cls = '') {
   const line = el('span', { class: cls }, `${text}\n`);
@@ -30,6 +32,7 @@ function state(text, tone = 'plain') {
 
 function onLine(line) {
   write(`< ${line}`);
+  heard.push(line);
   lines.push(line);
   if (/^ok\b/.test(line)) {
     const got = lines;
@@ -46,6 +49,7 @@ async function readLoop() {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
+        lastData = Date.now();
         buffer += decoder.decode(value, { stream: true });
         let i;
         while ((i = buffer.search(/\r?\n/)) >= 0) {
@@ -117,15 +121,41 @@ function readFacts(cmd, got) {
   }
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Readable Marlin text (not line noise from the wrong speed). */
+const readable = (line) => /^[ -~]+$/.test(line) && /[a-z]{3}/i.test(line);
+
+/**
+ * Opening the port resets the printer. The Workhorse then takes several seconds to boot and ignores
+ * anything sent before it is done, so wait for its boot text to go quiet before asking.
+ */
+async function waitForBoot() {
+  const t0 = Date.now();
+  while (Date.now() - t0 < 15000) {
+    await sleep(250);
+    const quiet = Date.now() - (lastData || t0);
+    if (heard.length && quiet > 1500) return; // it talked, then stopped: booted
+    if (!heard.length && quiet > 3000) return; // silent: no reset on this board, or wrong speed
+  }
+}
+
+/** { hello } when M115 is answered, { talking: true } when clean text came but no answer, else {}. */
 async function openAt(baud) {
+  heard = [];
+  lastData = 0;
   await port.open({ baudRate: baud, bufferSize: 8192 });
   readLoop();
-  // Opening resets many boards (Marlin prints "start"); give it a moment, then ask who it is.
-  await new Promise((r) => setTimeout(r, 2500));
-  const got = await ask('M115', 3000);
-  if (got) return got;
+  await waitForBoot();
+  // A silent port gets one try; a printer that is talking gets three (it may still be busy).
+  for (let i = 0; i < (heard.length ? 3 : 1); i++) {
+    const got = await ask('M115', 3000);
+    if (got) return { hello: got };
+  }
+  // Clean words mean this IS the right speed: keep the port open instead of trying another speed.
+  if (heard.some(readable)) return { talking: true };
   await close();
-  return null;
+  return {};
 }
 
 async function close() {
@@ -157,13 +187,13 @@ $('#connect').addEventListener('click', async () => {
     port = chosen;
     state(`Trying ${baud}…`);
     try {
-      const hello = await openAt(baud);
-      if (hello) {
-        state(`Connected at ${baud}. The printer answered.`, 'ok');
+      const { hello, talking } = await openAt(baud);
+      if (hello || talking) {
+        state(hello ? `Connected at ${baud}. The printer answered.` : `Connected at ${baud}. The printer talks, but did not answer M115 yet. Press M115 to ask again.`, hello ? 'ok' : 'plain');
         fact('Speed', String(baud));
         $('#disconnect').disabled = false;
         for (const b of document.querySelectorAll('#asks button')) b.disabled = false;
-        readFacts('M115', hello);
+        if (hello) readFacts('M115', hello);
         return;
       }
     } catch (e) {
