@@ -327,20 +327,43 @@ test('the polled endpoints share one per-address limit; health does not', async 
   assert.deepEqual(new Set(perIp.seen), new Set(['ip 198.51.100.7']));
 });
 
-test('teacher: a short phrase is refused with a clear message; suggestions are long enough', async () => {
+test('teacher: any phrase opens slicing; an empty one is refused; suggestions work', async () => {
   const e = { ...env(), TEACHER_KEY: 'test-teacher-key-123' };
   const teacher = (method, body) => worker.fetch(new Request('https://uploadmymodel.com/api/teacher/slicing', {
     method,
     headers: { 'x-teacher-key': 'test-teacher-key-123', 'content-type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   }), e);
-  let res = await teacher('PUT', { phrase: 'blue robot', minutes: 50 });
+  let res = await teacher('PUT', { phrase: '!!', minutes: 50 });
   assert.equal(res.status, 400);
-  assert.match((await res.json()).message, /needs 12 to 40 letters or numbers, so students cannot guess it\. Press "New phrase"/);
+  assert.match((await res.json()).message, /needs 1 to 40 letters or numbers/);
+  res = await teacher('PUT', { phrase: 'Cat', minutes: 50 });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).phrase, 'cat');
   res = await teacher('GET');
   const { suggestion } = await res.json();
   assert.match(suggestion, /^[a-z]+-[a-z]+-[a-z]+-[1-9][0-9]$/);
   res = await teacher('PUT', { phrase: suggestion, minutes: 50 });
   assert.equal(res.status, 200);
   assert.equal((await res.json()).phrase, suggestion);
+});
+
+test('teacher: "Set new phrase" swaps the phrase and keeps the end time; refused while closed', async () => {
+  const e = { ...env(), TEACHER_KEY: 'test-teacher-key-123' };
+  const teacher = (method, body) => worker.fetch(new Request('https://uploadmymodel.com/api/teacher/slicing', {
+    method,
+    headers: { 'x-teacher-key': 'test-teacher-key-123', 'content-type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  }), e);
+  await teacher('DELETE');
+  let res = await teacher('PUT', { phrase: 'room 12', keep: true });
+  assert.equal(res.status, 409); // closed: nothing to change
+  res = await teacher('PUT', { phrase: 'first-phrase', minutes: 50 });
+  const { until } = await res.json();
+  res = await teacher('PUT', { phrase: 'Room 12', keep: true });
+  assert.equal(res.status, 200);
+  const s = await res.json();
+  assert.equal(s.phrase, 'room-12');
+  assert.equal(s.until, until);
+  assert.equal((await (await teacher('GET')).json()).phrase, 'room-12');
 });

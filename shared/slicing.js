@@ -7,12 +7,13 @@
 // Worker allows 60 tries a minute from one address (a school shares one), and a suggested phrase
 // is one of PHRASE_COUNT (about 450 million, over 2^28): trying them all from one address takes
 // about 14 years, and a 50-minute window gives a guesser about a 1 in 150,000 chance. A teacher's
-// own phrase must be 12 characters or more.
+// own phrase can be anything (Dalton's call, 2026-09-28): a short one is the teacher's choice to
+// make, and the per-address limit still slows guessing.
 
 // How long the teacher can open slicing for, in minutes.
 export const SLICING_DURATIONS = [15, 50, 90, 240, 480];
 
-export const MIN_PHRASE = 12;
+export const MIN_PHRASE = 1;
 export const MAX_PHRASE = 40;
 
 /** "Blue Robot  Pancake 42" -> "blue-robot-pancake-42". Case, spaces and dashes do not matter. */
@@ -112,13 +113,23 @@ export function generatePhrase(random = cryptoRandom) {
   return [...words, 10 + Math.floor(random() * NUMBERS)].join('-');
 }
 
-/** Check the teacher's "open slicing" request. */
-export function validateOpenRequest(input) {
-  if (input === null || typeof input !== 'object') return { ok: false, error: 'must be an object' };
-  if (!SLICING_DURATIONS.includes(input.minutes)) return { ok: false, error: 'minutes: not one of the choices' };
-  const phrase = normalizePhrase(input.phrase ?? '');
+/** Check a class phrase the teacher typed. */
+export function validatePhrase(text) {
+  const phrase = normalizePhrase(text ?? '');
   if (phrase.length < MIN_PHRASE || phrase.length > MAX_PHRASE) {
     return { ok: false, error: `phrase: ${MIN_PHRASE} to ${MAX_PHRASE} letters, numbers or dashes` };
   }
-  return { ok: true, phrase, minutes: input.minutes };
+  return { ok: true, phrase };
+}
+
+/**
+ * Check the teacher's slicing request: { phrase, minutes } opens (or reopens) the window;
+ * { phrase, keep: true } only changes the phrase and keeps the window's end time.
+ */
+export function validateOpenRequest(input) {
+  if (input === null || typeof input !== 'object') return { ok: false, error: 'must be an object' };
+  const p = validatePhrase(input.phrase);
+  if (input.keep === true) return p.ok ? { ok: true, phrase: p.phrase, keep: true } : p;
+  if (!SLICING_DURATIONS.includes(input.minutes)) return { ok: false, error: 'minutes: not one of the choices' };
+  return p.ok ? { ok: true, phrase: p.phrase, minutes: input.minutes } : p;
 }

@@ -222,6 +222,7 @@ function showSlicing(s) {
   now.className = `slicing-now ${open ? 'open' : 'closed'}`;
   $('#bigPhrase').hidden = !open;
   $('#bigPhrase').textContent = open ? s.phrase : '';
+  $('#phraseApply').disabled = !open;
   paint();
   if (open) slicingTimer = setInterval(paint, 30_000);
   $('#slicingNote').textContent = s.engine === false ? 'No slicer is connected to this site yet, so Slice still says "not connected".' : '';
@@ -242,6 +243,17 @@ $('#phraseNew').addEventListener('click', async () => {
     $('#phraseSet').value = (await slicingApi('GET')).suggestion;
   } catch (e) {
     $('#slicingNote').textContent = e.message;
+  }
+});
+
+$('#phraseApply').addEventListener('click', async () => {
+  try {
+    const s = await slicingApi('PUT', { phrase: $('#phraseSet').value, keep: true });
+    $('#phraseSet').value = s.phrase;
+    showSlicing(s);
+    say(`New phrase is set. Put "${s.phrase}" on the board.`, 'ok');
+  } catch (e) {
+    say(e.message, 'error');
   }
 });
 

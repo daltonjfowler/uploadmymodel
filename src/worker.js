@@ -186,12 +186,19 @@ async function handleTeacher(request, env, url, ctx) {
     if (!v.ok) {
       return json(400, {
         error: 'invalid',
-        message: `The class phrase needs ${MIN_PHRASE} to ${MAX_PHRASE} letters or numbers, so students cannot guess it. `
-          + 'Press "New phrase" for an easy one, or make yours longer.',
+        message: `The class phrase needs ${MIN_PHRASE} to ${MAX_PHRASE} letters or numbers.`,
         details: [v.error],
       });
     }
     if (!env.CLASS_KV) return json(503, { error: 'storage', message: 'Storage is not set up on this server.' });
+    if (v.keep) {
+      // New phrase, same window: students with the old phrase are asked for the new one.
+      const rec = await readSlicing(env);
+      if (!rec) return json(409, { error: 'closed', message: 'Slicing is closed. Press "Open slicing" to open it with this phrase.' });
+      const ttl = Math.max(60, Math.ceil((rec.until - Date.now()) / 1000) + 60);
+      await env.CLASS_KV.put(KV_SLICING, JSON.stringify({ phrase: v.phrase, until: rec.until }), { expirationTtl: ttl });
+      return json(200, { open: true, phrase: v.phrase, until: rec.until, engine: !!slicerSender(env) });
+    }
     const until = Date.now() + v.minutes * 60_000;
     // KV forgets it by itself a minute after it runs out.
     await env.CLASS_KV.put(KV_SLICING, JSON.stringify({ phrase: v.phrase, until }), { expirationTtl: v.minutes * 60 + 60 });

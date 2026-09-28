@@ -89,16 +89,21 @@ test('class phrases: forgiving to type, strict to check', () => {
   assert.equal(normalizePhrase('Golden Walrus Lantern 42'), 'golden-walrus-lantern-42');
   assert.match(generatePhrase(), /^[a-z]+-[a-z]+-[a-z]+-[1-9][0-9]$/);
   assert.deepEqual(validateOpenRequest({ minutes: 50, phrase: 'Blue Robot Pancake' }), { ok: true, phrase: 'blue-robot-pancake', minutes: 50 });
-  for (const bad of [{ minutes: 51, phrase: 'blue-robot-pancake' }, { minutes: 50, phrase: 'ab' }, { minutes: 50, phrase: 'x'.repeat(41) }, null]) {
+  for (const bad of [{ minutes: 51, phrase: 'blue-robot-pancake' }, { minutes: 50, phrase: '' }, { minutes: 50, phrase: '!!' }, { minutes: 50, phrase: 'x'.repeat(41) }, null]) {
     assert.equal(validateOpenRequest(bad).ok, false, JSON.stringify(bad));
   }
 });
 
-test("class phrases: a teacher's own must be 12 characters or more", () => {
-  assert.equal(MIN_PHRASE, 12);
-  assert.equal(validateOpenRequest({ minutes: 50, phrase: 'blue-robot' }).ok, false); // 10
-  assert.equal(validateOpenRequest({ minutes: 50, phrase: 'blue robot!!' }).ok, false); // 10 once cleaned up
-  assert.equal(validateOpenRequest({ minutes: 50, phrase: 'blue-robot-7' }).ok, true); // 12
+test("class phrases: a teacher's own can be any length up to the box (Dalton's call)", () => {
+  assert.equal(MIN_PHRASE, 1);
+  assert.deepEqual(validateOpenRequest({ minutes: 50, phrase: 'Cat' }), { ok: true, phrase: 'cat', minutes: 50 });
+  assert.equal(validateOpenRequest({ minutes: 50, phrase: '7' }).ok, true);
+});
+
+test('class phrases: "Set phrase" changes the phrase and keeps the window', () => {
+  assert.deepEqual(validateOpenRequest({ phrase: 'Room 12', keep: true }), { ok: true, phrase: 'room-12', keep: true });
+  assert.equal(validateOpenRequest({ phrase: '', keep: true }).ok, false);
+  assert.equal(validateOpenRequest({ phrase: 'room-12', keep: 'yes' }).ok, false); // no minutes, not a keep
 });
 
 test('suggested phrases: too many to guess, easy to type', () => {
