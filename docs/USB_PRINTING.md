@@ -1,11 +1,12 @@
-# Print from USB: plan (not built yet)
+# Print from USB: plan (option A built)
 
 > **2026-09-28 update: option A is BUILT** (`web/src/printer-usb.js`, "Copy to printer (USB)" on the
 > result card, teacher switch "Copy to the printer over USB", on by default). The school test that
 > day: 250000, `Cap:SD_WRITE:1`, `ok P15 B3`, 8.3 names only. The copy uses line numbers and
 > checksums, keeps at most 3 lines / 110 bytes in flight, drops comments, refuses SD commands in
 > the file, sends nothing before "Writing to file", and stops if the printer restarts or says
-> busy. It never prints and never deletes. Real copy speed: measured on the first school copy.
+> busy. It never prints and never deletes. Real copy speed: about 10 KB/s, so a big file takes
+> many minutes.
 
 Dalton asked (2026-09-26) whether students could print over the printer's USB cable instead of
 carrying an SD card. This page is the plan. The only thing built so far is a **read-only test

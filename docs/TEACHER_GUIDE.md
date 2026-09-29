@@ -1,12 +1,15 @@
 # Teacher guide
 
-What works today (2026-09-26) and how to run it. Student steps are in
+What works today (2026-09-29) and how to run it. Student steps are in
 [STUDENT_GUIDE.md](STUDENT_GUIDE.md).
 
 ## Status
 
 - **Live (2026-09-26):** the student page, real slicing (school's Cura LE 4.13.2 engine, about
   15 s for a supported Benchy), and the teacher page.
+- **Since 2026-09-28:** PETG and TPU besides PLA, **Copy to printer (USB)**, and the third
+  settings tab, **Assistant to the Regional Manager** (extra settings behind its own password,
+  the `ARM_KEY` Worker secret).
 - Slicing only works while you have it open for the class (below). Everything else works any time.
 
 ## The teacher page
@@ -23,10 +26,15 @@ What works today (2026-09-26) and how to run it. Student steps are in
    - **Starts at**: what every student starts with, whether it is locked or not. "(school)" marks
      the current school Cura profile.
 3. **Longest print.** Files that would print longer are refused, with a hint to use Fast quality,
-   less infill or a smaller size. This uses the slicer's own time estimate, so it only works once
-   the slicer is live.
-4. **Note to students.** Up to 160 characters, shown at the top of the print settings.
-5. **Save for the class.** Students get the change when they open or reload the page.
+   less infill or a smaller size. This uses the slicer's own time estimate.
+4. **Materials students may pick.** PolyLite PLA (the only one ticked to start), PolyLite PETG
+   and PolyFlex TPU95. Temperatures and speeds come from LulzBot's own file for each. The file
+   name ends in `-petg` or `-tpu`, so nobody prints it with the wrong filament.
+5. **Copy to the printer over USB.** On by default. Students can copy their file onto the
+   printer's SD card over the USB cable (Chrome only). It never starts a print: you still press
+   Print on the printer. It is slow, about 10 KB/s.
+6. **Note to students.** Up to 160 characters, shown at the top of the print settings.
+7. **Save for the class.** Students get the change when they open or reload the page.
    **Back to the school profile** puts everything back (still needs Save).
 
 ## Opening slicing for a class
@@ -39,7 +47,10 @@ early; otherwise it closes by itself. To change the phrase while it is open, typ
 press **New phrase**) and press **Set new phrase**: the end time stays the same. While it is closed nobody can wake the slicer, so there is
 nothing to pay for.
 
-## One password for all three sites (later)
+Wrong guesses of the teacher key or the class phrase lock out only the device that made them
+(5 wrong in a row lock it for 5 s, then longer), never the whole class.
+
+## One password for all three sites
 
 Each site checks its own `TEACHER_KEY` secret. The simplest way to share one password is to set
 the same key on all three: run `npx wrangler secret put TEACHER_KEY` in each project folder
@@ -49,8 +60,9 @@ to accept a list of keys.
 
 ## What students can never change
 
-Temperatures, speeds, cooling, retraction, start and end G-code, and the filament. These come from
-Cura LulzBot Edition 4.13.2's own profile files (the version the school uses), the same as today.
+Temperatures, speeds, cooling, retraction, start and end G-code. These come from Cura LulzBot
+Edition 4.13.2's own profile files (the version the school uses), the same as today. Students pick
+a material only from the ones you tick. The third tab never has any of these either.
 
 ## SD cards (not yet checked on the printers)
 
@@ -65,9 +77,8 @@ Cura LulzBot Edition 4.13.2's own profile files (the version the school uses), t
 
 1. **Student name on the printer screen** during the print (an `M117` line)? Today it is only in
    the file name, which students can change.
-2. At school: note the Cura LE version (Help → About), print one file from uploadmymodel next to
-   one from school Cura, and run the **printer USB test** (`/usb-test/`) on a Chromebook for
-   "print from USB" (`docs/USB_PRINTING.md`).
+2. At school: note the Cura LE version (Help → About) and print one file from uploadmymodel next
+   to one from school Cura.
 
 Decided 2026-09-26: tree supports always 0% infill (hollow branches in school's engine); the
 teacher opens slicing with a class phrase; students name their files.

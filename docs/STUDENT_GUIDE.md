@@ -38,12 +38,15 @@ The **class settings** work for most prints. Change something only if you know w
 
 | Setting | What it does | When to change it |
 |---|---|---|
+| Material | PLA (the class plastic), PETG or TPU (flexible), if your teacher allows them | Pick the one loaded in the printer. The file name ends in `-petg` or `-tpu` so you can tell |
 | Print quality | Standard (0.25 mm) is the class setting | **Fast** for rough test parts. **Fine detail** (in Custom) only for tiny details like faces or small text: it takes much longer |
 | Infill | How full the inside is | More (30-50%) for parts that get pushed on |
 | Tree supports | Branches that hold up red parts | The box under **Support** tells you: turn them off, turn them on, or pick **Everywhere** when red parts are above your model instead of the bed |
 | Adhesion | Skirt (a line around it, the default) or Brim (a flat rim that helps it stick) | Brim for tall, thin or tiny parts. Custom also has Raft (a mat under the whole part) |
 
-Settings with a 🔒 are set by your teacher.
+Settings with a 🔒 are set by your teacher. The third tab, **Assistant to the Regional Manager**,
+has extra settings (colour change pauses, custom layer height, fuzzy skin, vase mode and more). It
+needs a password from your teacher.
 
 ## 5. Slice and save
 
@@ -55,9 +58,14 @@ Settings with a 🔒 are set by your teacher.
 4. Press **Save to SD card**. In the window that opens, pick the class SD card and press Save.
    Then **eject the card** before you pull it out.
 
+   Or plug the printer's USB cable into the Chromebook and press **Copy to printer (USB)**. It
+   copies the file onto the printer's own SD card. It is slow (a big file can take many minutes),
+   and it does not start the print.
+
 ## 6. Print
 
-Put the card in the printer, pick your file on the screen, and ask your teacher to start it.
+Put the card in the printer (skip this if you copied over USB), pick your file on the screen, and
+ask your teacher to start it.
 
 **Something wrong?** Read the orange message on the page. It says what to fix. If it still does
 not work, ask your teacher.
