@@ -47,6 +47,19 @@ export const ARM_SETTINGS = [
     options: [profile('Sharpest corner'), opt('back', 'At the back', 'back', 'The little bump where each layer starts goes at the back.'),
       opt('random', 'Random', 'random', 'Spread everywhere: no line, but tiny dots all over.'), opt('shortest', 'Shortest path', 'shortest', 'Fastest: the seam goes wherever is quickest.')],
     help: 'Every layer starts and ends somewhere, leaving a tiny bump. This picks where.' },
+  // "Custom…" under Layer height (Dalton 2026-09-28). 0.10 to 0.40 mm: Cura warns past 80% of the
+  // 0.50 mm nozzle (Dalton agreed to keep that cap). Speeds and temperatures still come from a LulzBot profile: the page picks the
+  // nearest one (Fine detail / Standard / Fast) as the base.
+  { id: 'layerHeight', section: 'quality', label: 'Custom layer height', cura: 'layer_height', merged: true,
+    options: [profile('Use the profile'), ...Array.from({ length: 16 }, (_, i) => {
+      const mm = Math.round((0.1 + i * 0.02) * 100) / 100;
+      return opt(mm.toFixed(2), `${mm.toFixed(2)} mm`, mm, mm < 0.16 ? 'Super thin: very smooth, very slow.' : mm > 0.32 ? 'Thick: fast, you can see the lines.' : 'In between.');
+    })],
+    help: 'Pick any layer height from 0.10 to 0.40 mm.' },
+  { id: 'firstLayer', section: 'quality', label: 'First layer height', cura: 'layer_height_0',
+    options: [profile('From the layer height'), ...[0.2, 0.25, 0.3, 0.35, 0.4].map((mm) => opt(mm.toFixed(2), `${mm.toFixed(2)} mm`, mm,
+      mm < 0.3 ? 'Thinner first layer: sharper bottom edge, a bit harder to stick.' : mm > 0.35 ? 'Thicker first layer: sticks best on a bumpy bed.' : 'Normal.'))],
+    help: 'How thick the very first layer is. A thicker first layer sticks to the bed more easily.' },
   { id: 'adaptive', section: 'quality', label: 'Adaptive layers', cura: 'adaptive_layer_height_enabled',
     options: onOff('Thinner layers on curvy parts, thicker on straight parts. Smooth and still quick.', 'Every layer the same height.'),
     help: 'Lets the slicer change the layer height as it goes up your model.' },
@@ -67,6 +80,7 @@ export const ARM_SETTINGS = [
   // parent top_bottom_thickness would be ignored).
   { id: 'thickTops', section: 'quality', label: 'Top and bottom thickness', cura: ['top_thickness', 'bottom_thickness'],
     options: [profile('From the layer height'), opt('thin', 'Thin (0.8 mm)', 0.8, 'Less plastic. Tops may show the infill.'),
+      opt('1.0', '1.0 mm', 1, 'A little thinner than normal.'), opt('1.5', '1.5 mm', 1.5, 'A little thicker than normal.'),
       opt('thick', 'Thick (2.0 mm)', 2, 'Strong, smooth tops.'), opt('extra', 'Extra thick (3.0 mm)', 3, 'Very strong tops and bottoms.')],
     help: 'How thick the solid top and bottom skins are.' },
 
@@ -206,7 +220,8 @@ export function armValues() {
 
 /** Short words for the settings header, e.g. "Fuzzy skin · Ironing · 2 pauses". */
 export function summarizeArm(arm, base) {
-  const on = Object.keys(activeArm(arm, base)).map((id) => armDef(id).label);
+  const active = activeArm(arm, base);
+  const on = Object.keys(active).map((id) => (id === 'layerHeight' ? `${active[id]} mm layers` : armDef(id).label));
   const n = arm?.pauses?.length ?? 0;
   if (n) on.push(`${n} pause${n === 1 ? '' : 's'}`);
   return on.join(' · ');

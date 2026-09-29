@@ -49,7 +49,7 @@ test("the slicer's allow-list is exactly shared/arm.js (run scripts/arm-values.m
 });
 
 test('nothing on the tab can touch temperature, speed, flow, cooling, retraction, travel or G-code', () => {
-  const forbidden = /temp|speed|flow|cool|fan|retract|travel|accel|jerk|gcode|sequence|machine_|material_|prime|wipe|hop|z_offset|layer_height$/;
+  const forbidden = /temp|speed|flow|cool|fan|retract|travel|accel|jerk|gcode|sequence|machine_|material_|prime|wipe|hop|z_offset/;
   for (const key of ARM_SETTINGS.flatMap(curaKeys)) assert.doesNotMatch(key, forbidden, key);
 });
 
@@ -181,4 +181,14 @@ test('/api/arm checks the password; five wrong tries lock that device', async ()
   const locked = await ask('test-arm-key');
   assert.equal(locked.status, 429);
   assert.equal((await locked.json()).error, 'locked');
+});
+
+test('custom layer heights stay inside 80% of the 0.50 mm nozzle (Cura warns past it)', () => {
+  const values = (id) => ARM_SETTINGS.find((d) => d.id === id).options.filter((o) => o.value !== null).map((o) => o.value);
+  const layer = values('layerHeight');
+  assert.equal(layer.length, 16);
+  assert.equal(Math.min(...layer), 0.1);
+  assert.equal(Math.max(...layer), 0.4);
+  for (const v of values('firstLayer')) assert.ok(v >= 0.2 && v <= 0.4, String(v));
+  for (const v of values('thickTops')) assert.ok(v >= 0.8 && v <= 3, String(v));
 });

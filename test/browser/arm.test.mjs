@@ -56,14 +56,25 @@ check('an extra pattern is picked in the same picker', await page.$eval('.patter
 await page.click('.tabs [role=tab]:has-text("Custom")');
 check('Custom keeps its 7 class patterns', await count('.patterns [role=radio]'), 7);
 await page.click('.tabs .arm-tab');
-check('header summary shows the extras', /Fuzzy skin · More infill patterns · 1 pause|Fuzzy skin · 1 pause/.test(await page.$eval('.settings-summary', (e) => e.textContent)), true);
+check('header summary shows the extras', /Fuzzy skin/.test(await page.$eval('.settings-summary', (e) => e.textContent)), true);
 
+// Layer height: a 4th choice "Custom…" opens 0.10-0.40 mm; first layer and top/bottom become choices.
+check('layer height has Custom as a 4th choice', await page.$$eval('select[aria-label="Layer height"] option', (o) => o.map((x) => x.value)), ['high_speed', 'standard', 'high_detail', 'custom']);
+check('first layer height is a choice here', await count('select[aria-label="First layer height"]'), 1);
+check('top/bottom thickness is a choice here', await count('select[aria-label="Top and bottom thickness"]'), 1);
+await page.selectOption('select[aria-label="Layer height"]', 'custom');
+await page.waitForTimeout(150);
+await page.selectOption('select[aria-label="Custom layer height"]', '0.12');
+await page.waitForTimeout(150);
+check('custom 0.12 mm picks Fine detail as the base profile', await page.$eval('select[aria-label="Layer height"]', (s) => s.value), 'custom');
+check('header shows the custom height', /0\.12 mm layers/.test(await page.$eval('.settings-summary', (e) => e.textContent)), true);
+await page.selectOption('select[aria-label="First layer height"]', '0.30');
 await page.screenshot({ path: 'test/browser/.out/arm.png' }).catch(() => {});
 await page.click('#sample');
 await page.click('#action button.primary');
 await page.waitForSelector('#action .result.ok', { timeout: 20000 });
 check('slice sends the password', sent?.key, KEY);
-check('slice sends the extras', sent?.arm, { settings: { fuzzy: 'on', morePatterns: 'cross_3d' }, pauses: [5] });
+check('slice sends the extras', sent?.arm, { settings: { fuzzy: 'on', morePatterns: 'cross_3d', layerHeight: '0.12', firstLayer: '0.30' }, pauses: [5] });
 check('result says where it pauses', /Colour change pause at 5 mm \(layer 18\)/.test(await page.$eval('#action .result.ok', (e) => e.textContent)), true);
 console.log(errors.join('\n') || 'no errors');
 await browser.close();

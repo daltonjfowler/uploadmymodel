@@ -503,7 +503,9 @@ export class SettingsPanel extends EventTarget {
         rows.append(this.infoRow('Filament', m.name, 'Your teacher picked the filament for the class.', true));
       }
     }
-    if (section === 'quality') {
+    if (section === 'quality' && this.mode === 'arm') {
+      if (this.arm.settings.layerHeight) rows.append(this.customLayerRow());
+    } else if (section === 'quality') {
       const q = qualityById(s.quality);
       rows.append(this.infoRow('First layer height', `${q.firstLayerMm.toFixed(2)} mm`, 'The first layer is thicker so it sticks to the bed. Comes with the layer height you pick.'));
       rows.append(this.infoRow('Top/bottom thickness', `${q.topBottomMm.toFixed(2)} mm`, 'How thick the solid top and bottom skins are. Comes with the layer height you pick.'));
@@ -586,6 +588,8 @@ export class SettingsPanel extends EventTarget {
       row.append(this.patternPicker(arm));
     } else if (def.id === 'walls' && arm) {
       row.append(this.wallsSelect(def));
+    } else if (def.id === 'quality' && arm) {
+      row.append(this.qualitySelect(def));
     } else {
       const select = el('select', { 'aria-label': def.label });
       for (const opt of def.options) {
@@ -601,6 +605,61 @@ export class SettingsPanel extends EventTarget {
     }
     const current = def.options?.find((o) => o.id === value);
     this.hintOn(row, def.label, def.help + (current?.blurb ? `\n\n${current.label}: ${current.blurb}` : ''));
+    return row;
+  }
+
+  // Layer height in the third tab: Fast / Standard / Fine detail, or "Custom…" (0.10 to 0.40 mm).
+  // A custom height keeps the nearest LulzBot profile as the base, for its speeds and temperatures.
+  qualitySelect(def) {
+    const custom = this.arm.settings.layerHeight;
+    const select = el('select', { 'aria-label': def.label });
+    for (const o of def.options) {
+      const opt = el('option', { value: o.id }, o.label);
+      if (!custom && o.id === this.settings.quality) opt.selected = true;
+      select.append(opt);
+    }
+    const c = el('option', { value: 'custom' }, custom ? `Custom · ${custom} mm` : 'Custom…');
+    if (custom) c.selected = true;
+    select.append(c);
+    select.addEventListener('change', () => {
+      if (select.value === 'custom') return this.setCustomLayer(custom ?? '0.20');
+      const { layerHeight, ...rest } = this.arm.settings;
+      this.arm = { settings: rest, pauses: this.arm.pauses };
+      save(STORE_ARM, this.arm);
+      if (this.settings.quality === select.value) {
+        this.render();
+        this.dispatchEvent(new Event('change'));
+      } else this.set('quality', select.value);
+    });
+    return select;
+  }
+
+  setCustomLayer(id) {
+    const mm = Number(id);
+    const nearest = mm <= 0.21 ? 'high_detail' : mm <= 0.31 ? 'standard' : 'high_speed';
+    this.arm = { settings: { ...this.arm.settings, layerHeight: id }, pauses: this.arm.pauses };
+    save(STORE_ARM, this.arm);
+    if (!this.isLocked('quality') && this.settings.quality !== nearest) this.set('quality', nearest);
+    else {
+      this.render();
+      this.dispatchEvent(new Event('change'));
+    }
+  }
+
+  customLayerRow() {
+    const def = ARM_SETTINGS.find((d) => d.id === 'layerHeight');
+    const row = el('div', { class: 'row' });
+    row.append(el('span', { class: 'row-label' }, def.label));
+    const select = el('select', { 'aria-label': def.label });
+    for (const o of def.options.filter((x) => x.value !== null)) {
+      const opt = el('option', { value: o.id }, o.label);
+      if (o.id === this.arm.settings.layerHeight) opt.selected = true;
+      select.append(opt);
+    }
+    select.addEventListener('change', () => this.setCustomLayer(select.value));
+    row.append(select);
+    const q = qualityById(this.settings.quality);
+    this.hintOn(row, def.label, `${def.help}\n\nSpeeds and temperatures follow the ${q.label} profile (${q.layerMm.toFixed(2)} mm), the nearest one.`);
     return row;
   }
 

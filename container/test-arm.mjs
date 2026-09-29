@@ -45,7 +45,8 @@ for (const def of ARM_SETTINGS) {
     plain[key] ??= moves((await slice(base, { settings: Object.fromEntries(Object.entries(def.needs ?? {})) })).text);
     const r = await slice(base, { settings });
     // The sample piece has no holes, and its seam already sits at the back: those two cannot change it.
-    const changed = moves(r.text) !== plain[key] || def.id === 'holes' || (def.id === 'seam' && o.id === 'back');
+    // Standard's first layer is already 0.35 mm.
+    const changed = moves(r.text) !== plain[key] || def.id === 'holes' || (def.id === 'seam' && o.id === 'back') || (def.id === 'firstLayer' && o.id === '0.35');
     const ok = r.status === 200 && r.text.includes(';LAYER:0') && changed;
     report(ok, `${def.id}=${o.id}`, ok ? `${r.s} s` : `${r.status} ${changed ? '' : '(no change in the moves) '}${r.text.slice(0, 100)}`);
   }
