@@ -96,6 +96,12 @@ const encoder = new TextEncoder();
 // Secret comparison that leaks nothing through timing: both sides hashed to 32 bytes, then
 // Cloudflare's timingSafeEqual (same as uploadmylaser's src/constant-time.ts). Node (the unit
 // tests) has no crypto.subtle.timingSafeEqual; the loop does the same, never stopping early.
+/** True when `given` equals any of `keys`. Every key is compared, so the time does not say which one. */
+export async function anyKeyEquals(given, keys) {
+  const hits = await Promise.all(keys.map((k) => constantTimeEquals(given, k)));
+  return hits.some(Boolean);
+}
+
 export async function constantTimeEquals(a, b) {
   const [left, right] = await Promise.all([
     crypto.subtle.digest('SHA-256', encoder.encode(a)),
@@ -157,13 +163,14 @@ async function readSlicing(env) {
 // per-address lockout would let one student lock out the teacher or the class.
 // null = the key is right; otherwise the answer to send.
 async function teacherRefusal(request, env) {
-  const expected = env.TEACHER_KEY ?? '';
-  if (expected === '') {
+  // TEACHER_KEY_2: an optional second teacher (a student teacher); delete that secret to remove them.
+  const keys = [env.TEACHER_KEY, env.TEACHER_KEY_2].filter(Boolean);
+  if (!keys.length) {
     console.error(JSON.stringify({ message: 'TEACHER_KEY is not set; teacher endpoint refused' }));
   } else {
     const lock = await lockout(env, 'teacher', request);
     if (lock.locked) return lock.response(json);
-    if (await constantTimeEquals(request.headers.get('x-teacher-key') ?? '', expected)) {
+    if (await anyKeyEquals(request.headers.get('x-teacher-key') ?? '', keys)) {
       await lock.right();
       return null;
     }

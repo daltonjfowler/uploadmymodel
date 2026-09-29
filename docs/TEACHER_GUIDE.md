@@ -50,13 +50,16 @@ nothing to pay for.
 Wrong guesses of the teacher key or the class phrase lock out only the device that made them
 (5 wrong in a row lock it for 5 s, then longer), never the whole class.
 
-## One password for all three sites
+## One password for all four sites, plus a second teacher
 
-Each site checks its own `TEACHER_KEY` secret. The simplest way to share one password is to set
-the same key on all three: run `npx wrangler secret put TEACHER_KEY` in each project folder
-(uploadmycode, uploadmylaser, uploadmymodel) and paste the same key. For a separate password per
-person (you and a coworker, each one removable on its own), the sites would need a small change
-to accept a list of keys.
+Each site checks its own `TEACHER_KEY` secret. All four sites (uploadmycode, uploadmylaser,
+uploadmymodel, uploadmycut) use the same key: run `npx wrangler secret put TEACHER_KEY` in each
+project folder and paste the same key.
+
+A second teacher (for example a student teacher) gets their own password in the `TEACHER_KEY_2`
+secret, set the same way on each site. It opens the teacher page just like the first key. To take
+it away, run `npx wrangler secret delete TEACHER_KEY_2` in each project folder; the first key keeps
+working.
 
 ## What students can never change
 
