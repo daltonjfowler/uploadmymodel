@@ -51,9 +51,9 @@ button.linkbtn:hover:not(:disabled) { color: var(--accent); background: none; }
   background: var(--top); border-bottom: 1px solid var(--line); position: relative; z-index: 5;
 }
 .brand { font-size: 1.15rem; font-weight: 700; letter-spacing: -.01em; display: inline-flex; align-items: center; gap: 10px; }
-.brand img { border-radius: 16px; }
+.brand img { border-radius: 12px; }
 /* Dalton 2026-09-28: the robot at 72 px (was 36). Phones get 56 px, like the other three sites. */
-@media (max-width: 640px) { .brand img { width: 56px; height: 56px; border-radius: 12px; } }
+@media (max-width: 640px) { .brand img { width: 42px; height: 42px; border-radius: 9px; } }
 .stages { display: flex; gap: 2px; background: var(--card2); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
 .stage {
   border: 0; background: none; border-radius: 6px; padding: 5px 14px; font-weight: 650; font-size: .8rem;
@@ -137,7 +137,7 @@ button.linkbtn:hover:not(:disabled) { color: var(--accent); background: none; }
   background: color-mix(in srgb, var(--card) 88%, transparent); border: 2px dashed var(--accent-line);
   border-radius: 16px; backdrop-filter: blur(4px);
 }
-.empty-card img { border-radius: 16px; }
+.empty-card img { border-radius: 12px; }
 .empty-card h1 { margin: 10px 0 4px; font-size: 1.5rem; letter-spacing: -.01em; }
 .empty-card p { margin: 0 0 16px; color: var(--muted); }
 .empty-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
@@ -501,7 +501,7 @@ ul.plain { margin: 0; padding-left: 20px; color: var(--muted); }
   .tool-panel { position: static; width: auto; max-height: none; margin-top: 10px; }
   .empty { inset: auto; top: 10px; left: 10px; right: 10px; height: var(--view-h); }
   .empty-card { max-width: calc(100% - 24px); padding: 14px 12px; }
-  .empty-card img { width: 48px; height: 48px; }
+  .empty-card img { width: 36px; height: 36px; }
   .empty-card h1 { font-size: 1.2rem; }
   .right-col { display: contents; }
   .settings, .action { position: static; width: 100%; max-height: none !important; min-height: 0 !important; margin-top: 10px; }
