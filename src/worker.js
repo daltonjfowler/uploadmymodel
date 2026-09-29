@@ -406,7 +406,7 @@ async function handleSlice(request, env) {
   const stl = checkPlateSTL(stlBytes);
   if (!stl.ok) return refuse(400, stl.message);
 
-  const fileName = gcodeFileName(form.get('fileName'), form.get('name'), form.get('modelName'));
+  const fileName = gcodeFileName(form.get('fileName'), form.get('name'), form.get('modelName'), checked.settings.material);
 
   // The slicer (container/), if this deployment has one (see slicerSender).
   const send = slicerSender(env);

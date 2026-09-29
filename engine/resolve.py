@@ -25,8 +25,14 @@ def res_path(*parts):
 
 
 MACHINE = "taz_workhorse_se"
-MATERIAL_FILE = "PolyLite_PLA_(Polymaker).xml.fdm_material"
-MATERIAL_ID = "PolyLite_PLA_(Polymaker)"
+# The filaments the class may use (shared/settings.js MATERIALS): LulzBot's own 2.85 mm material
+# file and its Workhorse SE quality files for each. The id is what the Worker sends.
+MATERIALS = {
+    "polylite_pla": ("PolyLite_PLA_(Polymaker).xml.fdm_material", "PolyLite_PLA_(Polymaker)"),
+    "polylite_petg": ("PolyLite_PETg_(Polymaker).xml.fdm_material", "PolyLite_PETg_(Polymaker)"),
+    "polyflex_tpu95": ("PolyFlex_TPU95_(Polymaker).xml.fdm_material", "PolyFlex_(Polymaker)"),
+}
+MATERIAL_FILE, MATERIAL_ID = MATERIALS["polylite_pla"]
 
 
 def find_def(def_id):
@@ -246,7 +252,7 @@ def keys_of(props):
     return [k for k, p in props.items() if p.get("type") not in (None, "category")]
 
 
-def resolve(quality="high_detail", gl_user=None, ex_user=None):
+def resolve(quality="high_detail", gl_user=None, ex_user=None, material_id="polylite_pla"):
     """Every final setting value for one slice, as {"global", "extruder0", "material"}. gl_user and
     ex_user are the user layer (student choices), as strings like Cura stores them."""
     gl_user, ex_user = dict(gl_user or {}), dict(ex_user or {})
@@ -257,8 +263,9 @@ def resolve(quality="high_detail", gl_user=None, ex_user=None):
     qdir = None
     qname = {"high_detail": "High_detail", "standard": "Standard", "high_speed": "High_speed"}[quality]
     g_quality = read_cfg(res_path("quality", "taz_workhorse", "se", f"workhorse_se_global_{quality}.inst.cfg"))
-    e_quality = read_cfg(res_path("quality", "taz_workhorse", "se", f"{MATERIAL_ID}_{qname}_workhorse_se.inst.cfg"))
-    material, mat_meta = read_material(res_path("materials", MATERIAL_FILE), MACHINE)
+    mat_file, mat_id = MATERIALS[material_id]
+    e_quality = read_cfg(res_path("quality", "taz_workhorse", "se", f"{mat_id}_{qname}_workhorse_se.inst.cfg"))
+    material, mat_meta = read_material(res_path("materials", mat_file), MACHINE)
 
     def typed(d, props_a, props_b=None):
         out = {}

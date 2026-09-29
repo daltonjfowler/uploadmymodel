@@ -45,6 +45,9 @@ MIN_ATTEMPT_S = 10  # less than this left: do not start another attempt
 clock = time.monotonic  # the tests replace it
 
 QUALITY = {"high detail": "high_detail", "standard": "standard", "high speed": "high_speed"}
+# The filaments (shared/settings.js MATERIALS, engine/resolve.py MATERIALS). Optional in the settings
+# JSON: an older Worker sends none, which means PLA.
+MATERIAL_IDS = {"polylite_pla", "polylite_petg", "polyflex_tpu95"}
 # Exactly the keys toCuraOverrides() sends, with the values each may take.
 CHOICES = {
     "infill_pattern": {"grid", "lines", "triangles", "trihexagon", "cubic", "gyroid", "lightning"},
@@ -89,6 +92,9 @@ def check_settings(raw):
     if not isinstance(s, dict):
         raise Refused(400, "settings must be an object")
     expected = set(CHOICES) | set(NUMBERS) | BOOLS | {"quality_type"}
+    material = s.pop("material", "polylite_pla")
+    if material not in MATERIAL_IDS:
+        raise Refused(400, "material")
     if not expected <= set(s) or not set(s) <= expected | set(ARM_VALUES):
         raise Refused(400, f"settings keys must be {sorted(expected)} plus only these extras: {sorted(ARM_VALUES)}")
     if s["quality_type"] not in QUALITY:
@@ -107,6 +113,7 @@ def check_settings(raw):
             user[k] = cura_string(v)
         else:
             raise Refused(400, k)
+    user["__material"] = material  # taken out again in resolved(); never reaches the engine
     return QUALITY[s["quality_type"]], user
 
 
@@ -178,7 +185,9 @@ def resolved(quality, user):
     key = (quality, tuple(sorted(user.items())))
     r = _resolved.get(key)
     if r is None:
-        r = resolve.resolve(quality, gl_user=user, ex_user=user)
+        user = dict(user)
+        material = user.pop("__material", "polylite_pla")
+        r = resolve.resolve(quality, gl_user=user, ex_user=user, material_id=material)
         if len(_resolved) > 64:
             _resolved.clear()
         _resolved[key] = r

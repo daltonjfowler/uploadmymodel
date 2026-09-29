@@ -3,7 +3,7 @@
 // (STL/OBJ/3MF), shared/settings.js (what may be changed; the Worker checks the same list).
 
 import './style.css';
-import { LIMITS, PRINTER, formatMinutes, gcodeFileName, summarize } from '../../shared/settings.js';
+import { LIMITS, PRINTER, formatMinutes, gcodeFileName, materialById, summarize } from '../../shared/settings.js';
 import { $, el, esc, fmt } from './dom.js';
 import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.js';
 import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
@@ -666,7 +666,7 @@ function studentName() {
 let customFileName = '';
 
 function fileName() {
-  return gcodeFileName(customFileName, studentName(), viewer.models[0]?.name ?? 'model');
+  return gcodeFileName(customFileName, studentName(), viewer.models[0]?.name ?? 'model', panel.value.material);
 }
 
 // What the plate is called: the first model's file name (parts split from one file keep it).
@@ -676,7 +676,7 @@ function plateName() {
 }
 
 function defaultFileName() {
-  return gcodeFileName('', studentName(), plateName()).replace(/\.gcode$/, '');
+  return gcodeFileName('', studentName(), plateName(), panel.value.material).replace(/\.gcode$/, '');
 }
 
 function renderAction() {
@@ -1150,12 +1150,19 @@ function syncSupportAngle(angle = panel.value.supportAngle) {
 panel.addEventListener('preview', (e) => {
   if ('supportAngle' in e.detail) viewer.setSupportAngle(e.detail.supportAngle);
 });
+// The title-bar chip names the filament this file is for.
+function syncMaterialChip() {
+  const small = document.querySelector('#printerChip .chip-text small');
+  if (small) small.textContent = `SE 0.50 mm · ${materialById(panel.value.material).name.replace(/^Polymaker /, '')}`;
+}
 panel.addEventListener('change', () => {
   syncSupportAngle();
+  syncMaterialChip();
   invalidateSlice();
   renderAction();
 });
 syncSupportAngle();
+syncMaterialChip();
 
 $('#help').addEventListener('click', () => $('#helpDialog').showModal());
 $('#printerChip').addEventListener('click', () => $('#printerDialog').showModal());

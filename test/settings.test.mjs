@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  CLASS_DEFAULTS, INFILL_PATTERNS, PRINTER, SETTINGS, TREE_SUPPORT_INFILL, applyClassLocks, checkAgainstClass, lockedRows,
+  CLASS_DEFAULTS, DEFAULT_CLASS_CONFIG, INFILL_PATTERNS, MATERIALS, PRINTER, SETTINGS, TREE_SUPPORT_INFILL, applyClassLocks, checkAgainstClass, lockedRows,
   SIMPLE_QUALITIES, gcodeFileName, safeNamePart, summarize, toCuraOverrides, validateClassConfig, validateSettings,
 } from '../shared/settings.js';
 import { MAX_PHRASE, MIN_PHRASE, PHRASE_COUNT, PHRASE_WORDS, generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
@@ -12,7 +12,7 @@ import { checkPlateSTL } from '../src/worker.js';
 
 test('class defaults: the school profile current_lulzbot_9_18, but Standard layers (0.25 mm)', () => {
   assert.deepEqual({ ...CLASS_DEFAULTS }, {
-    quality: 'standard', infillDensity: 20, infillPattern: 'grid', walls: 2, support: 'buildplate', supportAngle: 60, adhesion: 'skirt',
+    material: 'polylite_pla', quality: 'standard', infillDensity: 20, infillPattern: 'grid', walls: 2, support: 'buildplate', supportAngle: 60, adhesion: 'skirt',
   });
   assert.equal(CLASS_DEFAULTS.supportAngle, PRINTER.supportAngleDeg);
   assert.equal(validateSettings(CLASS_DEFAULTS).ok, true);
@@ -57,7 +57,10 @@ test('Cura overrides: tree supports always 0% infill, temperatures never present
     assert.equal(c.support_enable, support !== 'none');
   }
   const keys = Object.keys(toCuraOverrides(CLASS_DEFAULTS));
-  for (const k of keys) assert.doesNotMatch(k, /temperature|speed|retract|gcode|fan|material/);
+  for (const k of keys) assert.doesNotMatch(k, /temperature|speed|retract|gcode|fan|material_/);
+  // The material is only ever a NAME from the list; its temperatures come from LulzBot's files.
+  assert.ok(MATERIALS.some((m) => m.id === toCuraOverrides(CLASS_DEFAULTS).material));
+  assert.equal(toCuraOverrides({ ...CLASS_DEFAULTS, material: 'nylon' }).material, 'polylite_pla');
   assert.equal(toCuraOverrides({ quality: 'high_speed' }).quality_type, 'high speed');
   assert.equal(toCuraOverrides(CLASS_DEFAULTS).support_angle, 60);
   assert.equal(validateSettings({ supportAngle: 45 }).settings.supportAngle, 45);
@@ -224,4 +227,32 @@ test('class setup: locked settings must match the teacher, open ones may differ'
 test('Recommended shows Fast and Standard; Fine detail is in Custom only', () => {
   assert.deepEqual(SIMPLE_QUALITIES, ['high_speed', 'standard']);
   assert.equal('layer_height' in toCuraOverrides({ quality: 'standard' }), false);
+});
+
+test('materials: PLA, PETG and TPU; the teacher allows PLA only to start', () => {
+  assert.deepEqual(MATERIALS.map((m) => m.id), ['polylite_pla', 'polylite_petg', 'polyflex_tpu95']);
+  assert.deepEqual(DEFAULT_CLASS_CONFIG.materials, ['polylite_pla']);
+  assert.equal(validateSettings({ material: 'polylite_petg' }).settings.material, 'polylite_petg');
+  assert.equal(validateSettings({ material: 'nylon' }).ok, false);
+  const pla = validateClassConfig({}).config;
+  assert.deepEqual(checkAgainstClass({ ...CLASS_DEFAULTS, material: 'polylite_petg' }, pla), ['Material']);
+  assert.equal(applyClassLocks({ material: 'polylite_petg' }, pla).material, 'polylite_pla');
+  const both = validateClassConfig({ materials: ['polyflex_tpu95', 'polylite_petg'] }).config;
+  assert.deepEqual(both.materials, ['polylite_petg', 'polyflex_tpu95']);
+  assert.equal(both.defaults.material, 'polylite_petg', 'the class default moves to an allowed material');
+  assert.deepEqual(checkAgainstClass({ ...both.defaults, material: 'polyflex_tpu95' }, both), []);
+  for (const bad of [[], ['nylon'], 'polylite_pla']) assert.equal(validateClassConfig({ materials: bad }).ok, false, JSON.stringify(bad));
+});
+
+test('materials: the file name says which filament, the locked rows show its temperatures', () => {
+  assert.equal(gcodeFileName('', 'Jordan', 'Rocket', 'polylite_pla'), 'jordan-rocket.gcode');
+  assert.equal(gcodeFileName('', 'Jordan', 'Rocket', 'polylite_petg'), 'jordan-rocket-petg.gcode');
+  assert.equal(gcodeFileName('My Case', 'Jordan', 'x', 'polyflex_tpu95'), 'my-case-tpu.gcode');
+  assert.equal(gcodeFileName('case-tpu', 'Jordan', 'x', 'polyflex_tpu95'), 'case-tpu.gcode');
+  assert.ok(gcodeFileName('a'.repeat(40), '', '', 'polylite_petg').replace('.gcode', '').length <= 30);
+  const rows = Object.fromEntries(lockedRows({ ...CLASS_DEFAULTS, material: 'polylite_petg' })[0].rows);
+  assert.equal(rows.Filament, 'Polymaker PolyLite PETG, 2.85 mm');
+  assert.equal(rows['Nozzle temperature'], '240 °C (240 °C first layer)');
+  assert.equal(rows['Bed temperature'], '80 °C (75 °C first layer)');
+  assert.match(summarize({ ...CLASS_DEFAULTS, material: 'polyflex_tpu95' }), /^TPU · /);
 });

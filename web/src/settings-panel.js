@@ -3,7 +3,7 @@
 // teacher's locked settings greyed out). Both tabs edit the same settings object.
 
 import {
-  ADHESION_CHOICES, DEFAULT_CLASS_CONFIG, INFILL_PATTERNS, WALL_CHOICES, QUALITIES, SECTIONS, SETTINGS, SIMPLE_ADHESION, SIMPLE_QUALITIES, lockedRows,
+  ADHESION_CHOICES, DEFAULT_CLASS_CONFIG, INFILL_PATTERNS, MATERIALS, WALL_CHOICES, materialById, QUALITIES, SECTIONS, SETTINGS, SIMPLE_ADHESION, SIMPLE_QUALITIES, lockedRows,
   SUPPORT_CHOICES, TREE_SUPPORT_INFILL, applyClassLocks, isClassDefault, qualityById, summarize,
   validateClassConfig, validateSettings,
 } from '../../shared/settings.js';
@@ -92,7 +92,7 @@ export class SettingsPanel extends EventTarget {
     this.mode = ['custom', 'arm'].includes(mode) ? mode : 'recommended';
     if (this.mode === 'arm' && !this.armKey) this.mode = 'custom';
     this.open = load(STORE_OPEN, true) !== false;
-    this.openSections = new Set(['pauses', 'quality', 'infill', 'support']);
+    this.openSections = new Set(['pauses', 'material', 'quality', 'infill', 'support']);
     this.overhangs = 0; // mm² of red faces on the plate, from the viewer
     this.hasModels = false;
     this.render();
@@ -271,9 +271,32 @@ export class SettingsPanel extends EventTarget {
     }
   }
 
+  /** The filaments the teacher allows (class setup `materials`). */
+  allowedMaterials() {
+    const ids = this.config.materials ?? DEFAULT_CLASS_CONFIG.materials;
+    return MATERIALS.filter((m) => ids.includes(m.id));
+  }
+
+  materialPicker() {
+    const seg = el('div', { class: 'seg material', role: 'radiogroup', 'aria-label': 'Material' });
+    for (const m of this.allowedMaterials()) {
+      const on = this.settings.material === m.id;
+      const b = el('button', { type: 'button', role: 'radio', 'aria-checked': String(on), class: on ? 'on' : '' }, m.label);
+      b.addEventListener('click', () => this.set('material', m.id));
+      this.hintOn(b, m.name, `${m.blurb}\n\nMake sure this filament is in the printer before you print. The file name ends in "${m.suffix ? `-${m.suffix}` : 'nothing extra'}" so you can tell.`);
+      seg.append(b);
+    }
+    return seg;
+  }
+
   renderRecommended(body) {
     const s = this.settings;
     const q = qualityById(s.quality);
+
+    if (this.allowedMaterials().length > 1) {
+      const mat = this.block(body, 'Material', { label: 'Material', help: 'The plastic your print is made of. Pick the one that is loaded in the printer.' });
+      mat.append(this.materialPicker(), el('p', { class: 'note' }, materialById(s.material).blurb));
+    }
 
     // Print quality: big buttons, like picking a Cura profile. Fast and Standard here; Fine detail
     // lives in Custom (if a student picked it there, it shows here too).
@@ -470,6 +493,16 @@ export class SettingsPanel extends EventTarget {
   }
 
   extraRows(section, rows, s) {
+    if (section === 'material') {
+      const m = materialById(s.material);
+      if (this.allowedMaterials().length > 1) {
+        const row = el('div', { class: 'row wide' });
+        row.append(el('span', { class: 'row-label' }, 'Filament'), this.materialPicker());
+        rows.append(row, el('p', { class: 'note' }, `${m.name}. ${m.blurb} Use the filament that is loaded in the printer.`));
+      } else {
+        rows.append(this.infoRow('Filament', m.name, 'Your teacher picked the filament for the class.', true));
+      }
+    }
     if (section === 'quality') {
       const q = qualityById(s.quality);
       rows.append(this.infoRow('First layer height', `${q.firstLayerMm.toFixed(2)} mm`, 'The first layer is thicker so it sticks to the bed. Comes with the layer height you pick.'));

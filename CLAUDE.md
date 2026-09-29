@@ -94,6 +94,12 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   equal). Never add temperatures, speeds, flow, cooling, retraction, travel or G-code to it. Colour
   change pauses: container/pause.py (Cura LE's Marlin M0 pause, park X190 Y190). The container refuses
   any file that moves outside 280 x 280 x 285 mm. Real-engine check: node container/test-arm.mjs.
+- Materials (shared/settings.js MATERIALS: PolyLite PLA, PolyLite PETG, PolyFlex TPU95): only a NAME
+  goes to the slicer; temperatures/speeds/start G-code come from LulzBot's own material + Workhorse SE
+  quality files (engine/resolve.py MATERIALS). The teacher ticks which ones students may pick (class
+  setup `materials`, PLA only by default); the file name ends in -petg / -tpu. The page's temperature
+  rows are copied from a real slice: re-check them if the engine files change. Deploy the slicer
+  before (or with) a Worker that sends `material`: an old slicer refuses the key.
 - Use this app's own KV namespace when one is added. Never reuse uploadmycode's or uploadmylaser's.
 
 ## Commands

@@ -9,7 +9,7 @@ import unittest
 
 # Stand-ins for engine/resolve.py and engine/run.py, loaded before server.py imports them.
 fake_resolve = types.ModuleType("resolve")
-fake_resolve.resolve = lambda quality, gl_user=None, ex_user=None: {}
+fake_resolve.resolve = lambda quality, gl_user=None, ex_user=None, material_id="polylite_pla": {}
 fake_run = types.ModuleType("run")
 fake_run.ENGINE = sys.executable  # server.py asks the engine for its version once; any program will do
 sys.modules["resolve"] = fake_resolve

@@ -4,7 +4,7 @@
 
 import './style.css';
 import {
-  CLASS_DEFAULTS, DEFAULT_CLASS_CONFIG, MAX_CLASS_MESSAGE, PRINT_LIMITS, SETTINGS, formatMinutes, summarize,
+  CLASS_DEFAULTS, DEFAULT_CLASS_CONFIG, MATERIALS, MAX_CLASS_MESSAGE, PRINT_LIMITS, SETTINGS, formatMinutes, summarize,
 } from '../../shared/settings.js';
 import { $, el } from './dom.js';
 import { initThemeButton } from './theme.js';
@@ -145,6 +145,24 @@ function renderRows() {
     max.append(o);
   }
   $('#usbCopy').checked = config.usbCopy !== false;
+  const allowed = config.materials ?? DEFAULT_CLASS_CONFIG.materials;
+  $('#materials').innerHTML = '';
+  for (const m of MATERIALS) {
+    const label = el('label', { class: 'limit-row' });
+    const box = el('input', { type: 'checkbox', 'data-material': m.id });
+    box.checked = allowed.includes(m.id);
+    box.addEventListener('change', () => {
+      const next = MATERIALS.filter((x) => document.querySelector(`[data-material="${x.id}"]`).checked).map((x) => x.id);
+      if (!next.length) {
+        box.checked = true;
+        say('Students need at least one material.', 'error');
+        return;
+      }
+      config.materials = next;
+    });
+    label.append(box, el('span', {}, `${m.name}: ${m.blurb}`));
+    $('#materials').append(label);
+  }
   renderSummary();
 }
 

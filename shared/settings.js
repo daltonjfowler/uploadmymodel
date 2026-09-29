@@ -28,6 +28,36 @@ export const PRINTER = {
   supportAngleDeg: 60,
 };
 
+// The filaments the class may use (Dalton 2026-09-28: Polymaker PETG and TPU besides PLA). Each is
+// LulzBot's own 2.85 mm material file + its Workhorse SE quality files (engine/resolve.py
+// MATERIALS, container/server.py MATERIAL_IDS): temperatures, speeds, retraction and the start and
+// end G-code all come from those, never from here. The numbers below are only what the page shows,
+// read from a real slice of each (container, Cura LE 4.13.2, 2026-09-28): nozzle °C per layer height
+// as [print, first layer], bed °C as [first layer, then].
+// The teacher ticks which ones students may pick (class setup `materials`, PLA only to start). The
+// G-code file name ends in the material (-petg, -tpu) so nobody prints it with the wrong filament.
+export const MATERIALS = [
+  {
+    id: 'polylite_pla', label: 'PLA', name: 'Polymaker PolyLite PLA', suffix: '',
+    nozzle: { high_speed: [215, 210], standard: [215, 210], high_detail: [210, 205] }, bed: [65, 60],
+    blurb: 'The class plastic. Easy to print, stiff, a little brittle.',
+  },
+  {
+    id: 'polylite_petg', label: 'PETG', name: 'Polymaker PolyLite PETG', suffix: 'petg',
+    nozzle: { high_speed: [230, 230], standard: [240, 240], high_detail: [230, 230] }, bed: [75, 80],
+    blurb: 'Tougher and bendier than PLA, and it does not soften in a hot car. Can be a bit stringy.',
+  },
+  {
+    id: 'polyflex_tpu95', label: 'TPU (flexible)', name: 'Polymaker PolyFlex TPU95', suffix: 'tpu',
+    nozzle: { high_speed: [240, 235], standard: [240, 240], high_detail: [235, 240] }, bed: [70, 60],
+    blurb: 'Rubbery and squishy: phone cases, tires, bracelets, bumpers. Prints very slowly.',
+  },
+];
+
+export function materialById(id) {
+  return MATERIALS.find((m) => m.id === id) ?? MATERIALS[0];
+}
+
 // The three Cura LE quality profiles for this tool head and filament. Picking a layer height picks
 // the whole profile, like Cura's Recommended mode: speeds and first layer come with it.
 export const QUALITIES = [
@@ -109,6 +139,7 @@ export const WALL_CHOICES = [
 // height: LulzBot's Standard profile instead of the class profile's High Detail (Dalton 2026-09-26:
 // most prints do not need fine detail).
 export const CLASS_DEFAULTS = Object.freeze({
+  material: 'polylite_pla',
   quality: 'standard',
   infillDensity: 20,
   infillPattern: 'grid',
@@ -161,6 +192,7 @@ export const SETTINGS = [
 ];
 
 export const SECTIONS = [
+  { id: 'material', label: 'Material', icon: '🧵' },
   { id: 'quality', label: 'Quality', icon: '▤' },
   { id: 'walls', label: 'Walls', icon: '▢' },
   { id: 'infill', label: 'Infill', icon: '▦' },
@@ -173,11 +205,13 @@ export const SECTIONS = [
 // frozen profile files are the only source.
 export function lockedRows(settings) {
   const q = qualityById(settings?.quality);
+  const m = materialById(settings?.material);
+  const [nozzle, first] = m.nozzle[q.id];
   return [
   { section: 'Material', rows: [
-    ['Filament', 'Polymaker PolyLite PLA, 2.85 mm'],
-    ['Nozzle temperature', `${q.nozzleC} °C (${q.firstLayerNozzleC} °C first layer)`],
-    ['Bed temperature', '60 °C (65 °C first layer)'],
+    ['Filament', `${m.name}, 2.85 mm`],
+    ['Nozzle temperature', `${nozzle} °C (${first} °C first layer)`],
+    ['Bed temperature', `${m.bed[1]} °C (${m.bed[0]} °C first layer)`],
   ] },
   { section: 'Speed', rows: [
     ['Print speed', 'Set by the layer height you pick'],
@@ -227,6 +261,10 @@ export function validateSettings(input) {
       }
     }
   }
+  if ('material' in input) {
+    if (MATERIALS.some((m) => m.id === input.material)) settings.material = input.material;
+    else errors.push('material: not one of the choices');
+  }
   return errors.length ? { ok: false, errors } : { ok: true, settings };
 }
 
@@ -248,6 +286,7 @@ export function toCuraOverrides(settings) {
     support_infill_rate: TREE_SUPPORT_INFILL,
     support_angle: s.supportAngle,
     adhesion_type: s.adhesion,
+    material: materialById(s.material).id,
   };
 }
 
@@ -259,7 +298,8 @@ export function summarize(settings) {
   if (s.support === 'everywhere') support += ' everywhere';
   if (s.support !== 'none' && s.supportAngle !== CLASS_DEFAULTS.supportAngle) support += ` ${s.supportAngle}°`;
   const adhesion = s.adhesion === 'none' ? 'No skirt' : byId(ADHESION_CHOICES, s.adhesion).label;
-  return `${q.layerMm.toFixed(2)} mm · ${s.infillDensity}% · ${support} · ${adhesion}`;
+  const m = materialById(s.material);
+  return `${m.suffix ? `${m.label.replace(/ \(.*\)$/, '')} · ` : ''}${q.layerMm.toFixed(2)} mm · ${s.infillDensity}% · ${support} · ${adhesion}`;
 }
 
 export function isClassDefault(settings, defaults = CLASS_DEFAULTS) {
@@ -296,12 +336,17 @@ export function safeNamePart(text, fallback = 'model', max = LIMITS.maxNameLengt
  * The file name for the SD card. The student's own name for the file if they typed one, else
  * "student-model". Always plain letters, digits and dashes, and it always ends in ".gcode".
  */
-export function gcodeFileName(custom, student, model) {
+export function gcodeFileName(custom, student, model, material) {
+  const suffix = materialById(material).suffix;
+  const withSuffix = (base) => {
+    if (!suffix || base.endsWith(`-${suffix}`)) return base;
+    return `${base.slice(0, LIMITS.maxFileNameLength - suffix.length - 1).replace(/-$/, '')}-${suffix}`;
+  };
   const own = safeNamePart(String(custom ?? '').replace(/\.gcode$/i, ''), '', LIMITS.maxFileNameLength);
-  if (own) return `${own}.gcode`;
+  if (own) return `${withSuffix(own)}.gcode`;
   const who = safeNamePart(student, '');
   const what = safeNamePart(model, 'model');
-  return `${safeNamePart(`${who ? `${who}-` : ''}${what}`, 'model', LIMITS.maxFileNameLength)}.gcode`;
+  return `${withSuffix(safeNamePart(`${who ? `${who}-` : ''}${what}`, 'model', LIMITS.maxFileNameLength))}.gcode`;
 }
 
 // ---- The teacher's class setup (stored in KV, set on /teacher/) -------------------------------
@@ -322,6 +367,8 @@ export const DEFAULT_CLASS_CONFIG = Object.freeze({
   maxPrintMinutes: 0,
   // Students may copy their file onto the printer's SD card over USB (web/src/printer-usb.js).
   usbCopy: true,
+  // Which filaments students may pick (MATERIALS ids). PLA only until the teacher adds more.
+  materials: Object.freeze(['polylite_pla']),
 });
 
 /** 150 -> "2 h 30 min", 45 -> "45 min". */
@@ -372,18 +419,30 @@ export function validateClassConfig(input) {
     if (typeof input.usbCopy === 'boolean') usbCopy = input.usbCopy;
     else errors.push('usbCopy: must be true or false');
   }
-  return errors.length ? { ok: false, errors } : { ok: true, config: { open, defaults, message, maxPrintMinutes, usbCopy } };
+  let materials = [...DEFAULT_CLASS_CONFIG.materials];
+  if (input.materials !== undefined) {
+    const ids = MATERIALS.map((m) => m.id);
+    if (!Array.isArray(input.materials) || !input.materials.length || input.materials.some((m) => !ids.includes(m))) {
+      errors.push('materials: pick at least one of the listed materials');
+    } else materials = ids.filter((id) => input.materials.includes(id));
+  }
+  // The class default material must be one students may use.
+  if (!materials.includes(defaults.material)) defaults = { ...defaults, material: materials[0] };
+  return errors.length ? { ok: false, errors } : { ok: true, config: { open, defaults, message, maxPrintMinutes, usbCopy, materials } };
 }
 
 /** Student settings checked against the class setup: locked settings must equal the teacher's. */
 export function checkAgainstClass(settings, config) {
-  const locked = SETTINGS.filter((d) => !config.open[d.id] && settings[d.id] !== config.defaults[d.id]);
-  return locked.map((d) => d.label);
+  const locked = SETTINGS.filter((d) => !config.open[d.id] && settings[d.id] !== config.defaults[d.id]).map((d) => d.label);
+  if (!(config.materials ?? DEFAULT_CLASS_CONFIG.materials).includes(settings.material ?? CLASS_DEFAULTS.material)) locked.push('Material');
+  return locked;
 }
 
 /** A student's saved settings, with every locked setting put back to the teacher's value. */
 export function applyClassLocks(settings, config) {
   const out = { ...config.defaults, ...settings };
   for (const d of SETTINGS) if (!config.open[d.id]) out[d.id] = config.defaults[d.id];
+  const allowed = config.materials ?? DEFAULT_CLASS_CONFIG.materials;
+  if (!allowed.includes(out.material)) out.material = allowed.includes(config.defaults.material) ? config.defaults.material : allowed[0];
   return out;
 }
