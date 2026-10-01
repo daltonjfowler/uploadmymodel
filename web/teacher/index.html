@@ -31,10 +31,12 @@
 
     <section class="card page-card">
       <h2>Teacher key</h2>
-      <div class="key-row">
-        <input id="key" type="password" autocomplete="off" placeholder="teacher key" aria-label="Teacher key">
-        <button id="load" class="primary" type="button">Open class setup</button>
-      </div>
+      <form id="keyForm" class="key-row">
+        <!-- a fixed user name, so the browser's password manager can save and fill the key -->
+        <input type="text" name="username" autocomplete="username" value="teacher" hidden>
+        <input id="key" name="password" type="password" autocomplete="current-password" placeholder="teacher key" aria-label="Teacher key">
+        <button id="load" class="primary" type="submit">Open class setup</button>
+      </form>
       <div class="key-actions">
         <label class="check"><input id="remember" type="checkbox" aria-describedby="rememberWarn"> <span>Remember on this computer</span></label>
         <button id="forget" class="linkbtn" type="button">Forget the key on this computer</button>

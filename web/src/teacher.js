@@ -44,6 +44,14 @@ try {
   }
 } catch { /* storage blocked: type the key each time */ }
 
+let offered = false;
+/** Once a key works, ask the browser's password manager to keep it (Chrome and Edge show "Save password?"). */
+function offerToSaveKey() {
+  if (offered || !window.PasswordCredential || !navigator.credentials) return;
+  offered = true;
+  navigator.credentials.store(new window.PasswordCredential({ id: 'teacher', password: keyInput.value.trim(), name: 'Teacher key' })).catch(() => {});
+}
+
 function rememberKey() {
   try {
     if ($('#remember').checked) localStorage.setItem(KEY_STORAGE, keyInput.value.trim());
@@ -191,6 +199,7 @@ $('#load').addEventListener('click', async () => {
   try {
     config = await api('GET');
     rememberKey();
+    offerToSaveKey();
     renderRows();
     $('#setup').hidden = false;
     $('#warmCard').hidden = false;
@@ -201,9 +210,8 @@ $('#load').addEventListener('click', async () => {
     say(e.message, 'error');
   }
 });
-keyInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') $('#load').click();
-});
+// Enter in the key box submits the form, which clicks Open class setup
+$('#keyForm').addEventListener('submit', (e) => e.preventDefault());
 
 $('#school').addEventListener('click', () => {
   config = structuredClone(DEFAULT_CLASS_CONFIG);
