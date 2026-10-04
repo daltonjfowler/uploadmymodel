@@ -498,7 +498,7 @@ async function sliceWithEngine(send, stlBytes, settings, { arm = null, fileName,
       'cache-control': 'no-store',
       // Headers are Latin-1 only; "·" and friends go URL-encoded (the page decodes them).
       'x-print-summary': encodeURIComponent(summary),
-      // "5@25,12.5@60": the colour-change pauses the slicer put in (height mm @ layer).
+      // "5@25,12.5@60": the colour-change pauses the slicer put in (height mm @ layer, counted from 1 like the Preview tab).
       'x-pauses-done': res.headers.get('x-pauses-done') ?? '',
     },
   });

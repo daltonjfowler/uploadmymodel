@@ -463,7 +463,7 @@ export class SettingsPanel extends EventTarget {
   }
 
   pauseRows(rows) {
-    rows.append(el('p', { class: 'note' }, "The printer stops before the first layer above each height. Pull out the old filament, push the new colour in until it comes out of the nozzle, then press the knob to carry on. The Preview tab shows each layer's height."));
+    rows.append(el('p', { class: 'note' }, "The printer stops before the first layer above each height and moves the nozzle out of the way. The nozzle stays hot, so do not touch it: pull out the old filament, push the new colour in until it comes out of the nozzle, then press the knob to carry on. The Preview tab shows each layer's height."));
     const pauses = this.arm.pauses;
     pauses.forEach((h, i) => {
       const row = el('div', { class: 'row pause-row' });

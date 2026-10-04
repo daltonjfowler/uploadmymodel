@@ -929,7 +929,7 @@ function pausesDone(header, asked) {
   if (!asked.length) return null;
   const list = done.map(([h, layer]) => `${fmt(h)} mm (layer ${layer})`).join(', ');
   const skipped = asked.length - done.length;
-  let text = done.length ? `Colour change pause${done.length === 1 ? '' : 's'} at ${list}. The printer waits for the knob there.` : '';
+  let text = done.length ? `Colour change pause${done.length === 1 ? '' : 's'} at ${list}. The printer stops there so you can change the filament, then waits for the knob.` : '';
   if (skipped > 0) text += `${text ? ' ' : ''}${skipped === 1 ? 'One pause is' : `${skipped} pauses are`} above the top of your model, so ${skipped === 1 ? 'it was' : 'they were'} left out.`;
   return { done, text };
 }

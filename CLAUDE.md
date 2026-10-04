@@ -92,7 +92,9 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   ARM_KEY Worker secret (never in this public repo). Its list is checked in the page, the Worker and
   the container (container/arm_values.json from scripts/arm-values.mjs; test/arm.test.mjs keeps them
   equal). Never add temperatures, speeds, flow, cooling, retraction, travel or G-code to it. Colour
-  change pauses: container/pause.py (Cura LE's Marlin M0 pause, park X190 Y190). The container refuses
+  change pauses: container/pause.py (Cura LE's Marlin M0 pause, not M600; parks away from the
+  print, frees only the E motor, re-waits for the nozzle temperature, restores G92 E and M82/M83;
+  tests: `python container/test_pause.py`). The container refuses
   any file that moves outside 280 x 280 x 285 mm. Real-engine check: node container/test-arm.mjs.
 - Materials (shared/settings.js MATERIALS: PolyLite PLA, PolyLite PETG, PolyFlex TPU95): only a NAME
   goes to the slicer; temperatures/speeds/start G-code come from LulzBot's own material + Workhorse SE
