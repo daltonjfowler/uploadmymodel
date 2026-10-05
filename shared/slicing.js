@@ -32,10 +32,12 @@ export function normalizePhrase(text) {
 // would giggle at, size words that make a pair rude, and spellings kids trip on (desert / dessert,
 // arctic, leopard, grey / gray). One word each, so nobody has to guess "blue jay" or "bluejay".
 // Add words freely; remove one only while PHRASE_COUNT stays at 2^28 or more (test/settings.test.mjs).
+// Removed 2026-10-05 (Dalton): pancake and waffle ("blue pancake" / "blue waffle"), starfish (slang),
+// brown (brown + a food word).
 export const PHRASE_WORDS = [
   [
     'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'silver', 'golden', 'bronze',
-    'copper', 'indigo', 'teal', 'navy', 'lime', 'crimson', 'maroon', 'brown', 'tiny', 'mini',
+    'copper', 'indigo', 'teal', 'navy', 'lime', 'crimson', 'maroon', 'tiny', 'mini',
     'round', 'square', 'curly', 'spiky', 'fluffy', 'fuzzy', 'bumpy', 'shiny', 'sparkly', 'glowing',
     'frosty', 'snowy', 'rainy', 'windy', 'cloudy', 'foggy', 'icy', 'chilly', 'warm', 'crispy',
     'crunchy', 'smooth', 'silky', 'velvet', 'striped', 'spotted', 'dotted', 'plaid', 'happy',
@@ -67,7 +69,7 @@ export const PHRASE_WORDS = [
     'snail', 'sparrow', 'spider', 'squid', 'stingray', 'stork', 'swan', 'tapir', 'tiger', 'toad',
     'toucan', 'trout', 'tuna', 'turtle', 'viper', 'vulture', 'walrus', 'wasp', 'whale', 'wolf',
     'wombat', 'yak', 'zebra', 'alpaca', 'badger', 'beagle', 'bulldog', 'collie', 'terrier', 'corgi',
-    'starfish', 'lamb', 'bunny', 'kitten', 'puppy', 'duckling', 'cub', 'fawn', 'foal', 'ladybug',
+    'lamb', 'bunny', 'kitten', 'puppy', 'duckling', 'cub', 'fawn', 'foal', 'ladybug',
     'bumblebee', 'firefly', 'grasshopper', 'caterpillar', 'termite', 'scorpion', 'tarantula',
     'armadillo', 'anteater', 'hummingbird', 'kingfisher', 'osprey', 'albatross', 'cardinal',
     'parakeet', 'platypus', 'wallaby', 'salamander', 'crocodile', 'alligator', 'marlin',
@@ -79,7 +81,7 @@ export const PHRASE_WORDS = [
     'satellite', 'crater', 'rainbow', 'thunder', 'cloud', 'breeze', 'blizzard', 'tornado',
     'volcano', 'glacier', 'canyon', 'island', 'meadow', 'forest', 'river', 'lagoon', 'valley',
     'mountain', 'pebble', 'boulder', 'waterfall', 'puddle', 'iceberg', 'acorn', 'pinecone', 'maple',
-    'cactus', 'fern', 'tulip', 'clover', 'sunflower', 'seashell', 'pancake', 'waffle', 'pretzel',
+    'cactus', 'fern', 'tulip', 'clover', 'sunflower', 'seashell', 'pretzel',
     'bagel', 'noodle', 'pizza', 'cookie', 'cupcake', 'popcorn', 'pumpkin', 'apple', 'lemon',
     'mango', 'grape', 'pear', 'potato', 'tomato', 'pasta', 'burrito', 'sandwich', 'toast',
     'cereal', 'oatmeal', 'jelly', 'cheese', 'butter', 'smoothie', 'lemonade', 'cocoa', 'gumdrop',

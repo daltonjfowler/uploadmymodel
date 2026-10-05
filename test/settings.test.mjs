@@ -256,3 +256,8 @@ test('materials: the file name says which filament, the locked rows show its tem
   assert.equal(rows['Bed temperature'], '80 °C (75 °C first layer)');
   assert.match(summarize({ ...CLASS_DEFAULTS, material: 'polyflex_tpu95' }), /^TPU · /);
 });
+
+test('class phrases never use the words Dalton struck (giggle combos like "blue pancake")', () => {
+  const words = PHRASE_WORDS.flat();
+  for (const w of ['pancake', 'waffle', 'starfish', 'brown']) assert.ok(!words.includes(w), w);
+});
