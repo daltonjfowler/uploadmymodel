@@ -362,7 +362,7 @@ function renderGroupPanel(p) {
   p.append(el('span', { class: 'sub-label' }, 'Scale each (from its file size)'), scale);
   p.append(button('⊕ Center the group on the bed', () => viewer.centerSelected(), 'wide'));
   p.append(button('▦ Arrange everything', () => viewer.arrangeAll(), 'wide'));
-  p.append(button('✂ Split each into separate objects', splitSelected, 'linkbtn'));
+  p.append(splitPicker());
 }
 
 function renderTools() {
@@ -376,9 +376,17 @@ function renderTools() {
   $('#delBtn').disabled = !count;
 
   const p = $('#toolPanel');
+  if (cut && (count !== 1 || m !== cut.model || !viewer.models.includes(cut.model))) {
+    cut = null; // picked something else: the planes go
+    viewer.setCutPlanes(null);
+  }
   p.hidden = !count;
   if (!count) return;
   p.innerHTML = '';
+  if (cut) {
+    renderCutPanel(p, m);
+    return;
+  }
   if (count > 1 || !m) {
     renderGroupPanel(p);
     return;
@@ -397,7 +405,7 @@ function renderTools() {
     p.append(grid);
     p.append(el('p', { class: 'note' }, 'Drag the model to move it. It always sits on the bed. 0, 0 is the middle.'));
     p.append(button('⊕ Center on the bed', () => viewer.setPosition(m, 0, 0), 'wide'));
-    p.append(button('✂ Split into separate objects', splitSelected, 'linkbtn'));
+    p.append(splitPicker());
   }
 
   if (tool === 'scale') {
@@ -526,20 +534,20 @@ function renderObjects() {
 
 // One STL with several things in it (a whole set of keychains) becomes one object per thing, so
 // each can be moved, turned and laid flat on its own. See split.js for what counts as one thing.
-async function splitSelected() {
+async function splitSelected({ loose = false } = {}) {
   const list = viewer.selectedList;
   if (!list.length) return;
   busy('Looking for separate parts…');
   await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
   let plan;
   try {
-    plan = list.map((m) => ({ m, parts: splitParts(m.geometry.attributes.position.array) })).filter((p) => p.parts);
+    plan = list.map((m) => ({ m, parts: splitParts(m.geometry.attributes.position.array, { keepOverlapping: !loose }) })).filter((p) => p.parts);
   } finally {
     busy(null);
   }
   if (!plan.length) {
     toast(list.length === 1
-      ? `"${list[0].name}" is all one piece, so there is nothing to split. (Parts that touch or overlap stay together.)`
+      ? (loose ? `"${list[0].name}" is all one piece. To cut it apart, use Split → By a plane.` : `"${list[0].name}" is all one piece, so there is nothing to split. (Parts that touch or overlap stay together: try Split → Every loose piece, or By a plane.)`)
       : 'Each of these is all one piece, so there is nothing to split.', { timeout: 8000 });
     return;
   }
@@ -565,6 +573,154 @@ async function splitSelected() {
   });
 }
 
+
+// ---- Split by plane ---------------------------------------------------------------------------
+// Dalton, 2026-10-09: big prints in parts. Add flat cut planes (X, Y, Z), see them on the model, then
+// Cut: each piece gets its cut face filled (plane-cut.js) so it prints solid. Planes are in bed mm.
+
+let cut = null; // { model, planes: [{ axis, at }] } while a split by plane is being set up
+const AXIS_K = { x: 0, y: 1, z: 2 };
+const AXIS_LABEL = { x: 'X (left | right)', y: 'Y (front | back)', z: 'Z (flat)' };
+
+function startCut(axis = 'z', at = null) {
+  const m = viewer.selected;
+  if (!m || viewer.selection.size !== 1) {
+    toast('Click one model first, then split it by plane.');
+    return;
+  }
+  cut = { model: m, planes: [] };
+  addCutPlane(axis, at);
+}
+
+function addCutPlane(axis = null, at = null) {
+  if (!cut) return;
+  if (cut.planes.length >= 6) {
+    toast('Six planes is the most for one cut.');
+    return;
+  }
+  const used = new Set(cut.planes.map((p) => p.axis));
+  axis ??= ['z', 'x', 'y'].find((a) => !used.has(a)) ?? 'z';
+  const b = viewer.worldBox(cut.model);
+  const k = AXIS_K[axis];
+  const mid = (b[k] + b[k + 3]) / 2;
+  cut.planes.push({ axis, at: Math.round((at ?? mid) * 10) / 10 });
+  showCut();
+}
+
+function showCut() {
+  viewer.setCutPlanes(cut?.model ?? null, cut?.planes ?? []);
+  renderTools();
+}
+
+function endCut() {
+  if (!cut) return;
+  cut = null;
+  viewer.setCutPlanes(null);
+  renderTools();
+}
+
+async function applyCut() {
+  if (!cut) return;
+  const { model, planes } = cut;
+  busy('Cutting…');
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+  let result;
+  try {
+    result = viewer.cutModel(model, planes);
+  } finally {
+    busy(null);
+  }
+  const { made, open } = result;
+  if (!made.length) {
+    toast('The planes miss the model, so nothing was cut. Slide a plane onto the model.', { timeout: 8000 });
+    return;
+  }
+  endCut();
+  const entry = viewer.undoStack.at(-1);
+  if (viewer.models.length > LIMITS.maxObjects) {
+    undo();
+    toast(`That makes ${viewer.models.length + made.length - 1} objects, and the most for one plate is ${LIMITS.maxObjects}. Use fewer planes.`, { kind: 'error', timeout: 10000 });
+    return;
+  }
+  for (const m of made) checkHealth(m, { quiet: true });
+  toast(`Cut into ${made.length} pieces. Each has its cut face filled, so it prints solid.${open ? ' Part of the cut could not be closed (the model has holes there): check the pieces.' : ''}`, {
+    kind: open ? 'warn' : 'info',
+    timeout: open ? 12000 : 6000,
+    action: () => {
+      if (viewer.undoStack.at(-1) === entry) undo();
+      else toast('Something else changed since then. Use the Undo button to step back.', { key: 'history' });
+    },
+    actionLabel: 'Undo',
+    key: 'history',
+  });
+}
+
+function renderCutPanel(p, m) {
+  const title = el('div', { class: 'tp-title' });
+  title.innerHTML = `<strong>Split by plane</strong><span class="tp-model">${esc(m.name)}</span>`;
+  p.append(title);
+  const b = viewer.worldBox(m);
+  cut.planes.forEach((pl, i) => {
+    const k = AXIS_K[pl.axis];
+    const [lo, hi] = [b[k], b[k + 3]];
+    const row = el('div', { class: 'cutrow' });
+    const axis = el('select', { 'aria-label': `Plane ${i + 1} direction` });
+    for (const a of ['x', 'y', 'z']) axis.append(new Option(AXIS_LABEL[a], a, false, a === pl.axis));
+    axis.addEventListener('change', () => {
+      const kk = AXIS_K[axis.value];
+      pl.axis = axis.value;
+      pl.at = Math.round(((b[kk] + b[kk + 3]) / 2) * 10) / 10;
+      showCut();
+    });
+    const num = el('input', { type: 'number', step: 0.5, inputmode: 'decimal', 'aria-label': `Plane ${i + 1} position in mm` });
+    num.value = String(pl.at);
+    const range = el('input', { type: 'range', min: lo.toFixed(1), max: hi.toFixed(1), step: 0.1, 'aria-label': `Plane ${i + 1} position` });
+    range.value = String(pl.at);
+    range.addEventListener('input', () => {
+      pl.at = Number(range.value);
+      num.value = String(pl.at);
+      viewer.setCutPlanes(cut.model, cut.planes);
+    });
+    num.addEventListener('change', () => {
+      const v = Number(num.value);
+      if (Number.isFinite(v)) pl.at = Math.round(v * 10) / 10;
+      range.value = String(pl.at);
+      viewer.setCutPlanes(cut.model, cut.planes);
+    });
+    const rm = button('✕', () => {
+      cut.planes.splice(i, 1);
+      if (cut.planes.length) showCut();
+      else endCut();
+    }, 'iconbtn');
+    rm.title = 'Remove this plane';
+    row.append(axis, num, el('span', { class: 'unit' }, 'mm'), rm, range);
+    p.append(row);
+  });
+  p.append(button('＋ Add a plane', () => addCutPlane(), 'wide'));
+  const go = el('div', { class: 'btn-row' });
+  go.append(button('✂ Cut', applyCut, 'primary'), button('Cancel', endCut));
+  p.append(go);
+  p.append(el('p', { class: 'note' }, 'X cuts left from right, Y front from back, Z is a flat cut at a height above the bed. Every piece gets its cut face filled, so it prints solid; glue them after. Right-click the model to add a plane right where you click.'));
+}
+
+/** The split choices, as one dropdown (Dalton 2026-10-09). */
+function splitPicker() {
+  const s = el('select', { class: 'splitpick', 'aria-label': 'Split' });
+  s.append(new Option('✂ Split…', '', true, true));
+  s.options[0].disabled = true;
+  s.append(new Option('Separate parts (space between them)', 'parts'));
+  s.append(new Option('Every loose piece (even touching)', 'loose'));
+  if (viewer.selection.size === 1) s.append(new Option('By a plane… (cut in two or more)', 'plane'));
+  s.addEventListener('change', () => {
+    const v = s.value;
+    s.selectedIndex = 0;
+    if (v === 'parts') splitSelected();
+    else if (v === 'loose') splitSelected({ loose: true });
+    else if (v === 'plane') startCut();
+  });
+  return s;
+}
+
 // ---- Right-click menu on the plate ------------------------------------------------------------
 
 const menu = $('#ctxMenu');
@@ -575,11 +731,20 @@ function closeMenu() {
   menu.innerHTML = '';
 }
 
-function openMenu({ model, x, y }) {
+function openMenu({ model, point, x, y }) {
   const count = viewer.selection.size;
+  const here = cut && model === cut.model && point;
   const items = model
     ? [
-      ['✂', count > 1 ? 'Split each into separate objects' : 'Split into separate objects', splitSelected],
+      ...(here ? [
+        ['＋', 'Cut plane here: flat (Z)', () => addCutPlane('z', point.z)],
+        ['＋', 'Cut plane here: left | right (X)', () => addCutPlane('x', point.x)],
+        ['＋', 'Cut plane here: front | back (Y)', () => addCutPlane('y', point.y)],
+        null,
+      ] : []),
+      ['✂', count > 1 ? 'Split each into separate objects' : 'Split into separate objects', () => splitSelected()],
+      ['✂', 'Split every loose piece', () => splitSelected({ loose: true })],
+      ...(count === 1 && !cut ? [['▤', 'Split by plane…', () => startCut('z', point?.z ?? null)]] : []),
       null,
       ['⧉', 'Copy', duplicateSelected, 'Ctrl+D'],
       ['⬇', count > 1 ? 'Lay each one flat' : 'Biggest flat side down', () => viewer.forSelected('lay flat', (m) => viewer.layFlatAuto(m))],
@@ -1194,6 +1359,11 @@ window.addEventListener('keydown', (e) => {
     } else if (e.key === 'Home') setLayer(0);
     else if (e.key === 'End') setLayer(Infinity);
     else if (e.key === 'Escape') setStage('prepare');
+    return;
+  }
+  if (cut && e.key === 'Escape') {
+    e.preventDefault();
+    endCut();
     return;
   }
   const m = viewer.selected;

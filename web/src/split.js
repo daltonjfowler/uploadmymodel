@@ -12,10 +12,12 @@ const TOUCH = 0.01;
 
 /**
  * @param {Float32Array} positions triangle corners, 9 numbers per triangle
+ * @param {{ keepOverlapping?: boolean }} [opts] false: every loose piece comes apart, even when the
+ *   pieces touch or sit inside each other ("Every loose piece")
  * @returns {{ positions: Float32Array, cx: number, cy: number }[] | null} one entry per part, with
  *   the middle of its box in the model's own coordinates; null when it is all one part
  */
-export function splitParts(positions) {
+export function splitParts(positions, { keepOverlapping = true } = {}) {
   const tris = positions.length / 9;
   if (tris < 2) return null;
   const { id, unique } = weld(positions);
@@ -71,7 +73,7 @@ export function splitParts(positions) {
     return a;
   };
   const order = [...box.keys()].sort((a, b) => box[a][0] - box[b][0]);
-  for (let i = 0; i < pieces; i++) {
+  for (let i = 0; i < pieces && keepOverlapping; i++) { // "Every loose piece" skips this
     const a = box[order[i]];
     for (let j = i + 1; j < pieces; j++) {
       const b = box[order[j]];

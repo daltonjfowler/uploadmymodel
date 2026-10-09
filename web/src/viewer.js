@@ -14,6 +14,7 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import { LINE_TYPES } from './gcode.js';
+import { cutByPlanes } from './plane-cut.js';
 
 // Picking a 500k-triangle model by testing every triangle takes ~0.25 s on a slow Chromebook, too
 // slow for hover and drag. three-mesh-bvh (MIT) builds a search tree per model instead. Building
@@ -732,6 +733,83 @@ export class Viewer extends EventTarget {
     return made;
   }
 
+  // ---- Split by plane (plane-cut.js) ----------------------------------------------------------
+  // Planes are { axis: 'x' | 'y' | 'z', at } in bed millimetres (Z = height above the bed).
+
+  /** The model's box on the bed, mm: [x0, y0, z0, x1, y1, z1]. */
+  worldBox(model) {
+    model.mesh.updateMatrixWorld();
+    const b = model.geometry.boundingBox.clone().applyMatrix4(model.mesh.matrixWorld);
+    return [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z];
+  }
+
+  /** Show see-through cut planes over `model` (null hides them). Colours match the rotate rings. */
+  setCutPlanes(model, planes = []) {
+    if (!this.cutGroup) {
+      this.cutGroup = new THREE.Group();
+      this.scene.add(this.cutGroup);
+    }
+    for (const c of [...this.cutGroup.children]) {
+      this.cutGroup.remove(c);
+      c.geometry.dispose();
+      c.material.dispose();
+    }
+    if (model && planes.length) {
+      const [x0, y0, z0, x1, y1, z1] = this.worldBox(model);
+      const m = 6; // mm past the model on every side
+      const color = { x: 0xe5484d, y: 0x30a46c, z: 0x3e63dd };
+      for (const p of planes) {
+        const [w, h] = p.axis === 'x' ? [y1 - y0 + 2 * m, z1 - z0 + 2 * m] : p.axis === 'y' ? [x1 - x0 + 2 * m, z1 - z0 + 2 * m] : [x1 - x0 + 2 * m, y1 - y0 + 2 * m];
+        const mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(w, h),
+          new THREE.MeshBasicMaterial({ color: color[p.axis], transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }),
+        );
+        const [cx, cy, cz] = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2];
+        if (p.axis === 'x') { mesh.rotation.set(0, Math.PI / 2, 0); mesh.rotateZ(Math.PI / 2); mesh.position.set(p.at, cy, cz); }
+        else if (p.axis === 'y') { mesh.rotation.set(Math.PI / 2, 0, 0); mesh.position.set(cx, p.at, cz); }
+        else mesh.position.set(cx, cy, p.at);
+        mesh.renderOrder = 10;
+        mesh.raycast = () => {}; // never picked: clicks go to the model behind it
+        this.cutGroup.add(mesh);
+      }
+    }
+    this.requestRender();
+  }
+
+  /**
+   * Cut `model` along the planes. Each piece is closed (its cut face filled) and becomes its own model;
+   * pieces move a few mm apart along each cut, and a piece cut off the top drops onto the bed. One Undo
+   * step. Returns { made, open } (open: some of the cut could not be closed: the model has holes).
+   */
+  cutModel(model, planes) {
+    const s = model.mesh.scale, at = model.position;
+    // bed mm -> the model's own coordinates (turns are baked into the corners, so axes match)
+    const local = planes.map((p) => ({
+      axis: p.axis,
+      at: p.axis === 'z' ? p.at / s.z : (p.at - at[p.axis]) / s[p.axis],
+    }));
+    const { pieces, open } = cutByPlanes(model.geometry.attributes.position.array, local);
+    if (pieces.length < 2) return { made: [], open };
+    const GAP = 4; // mm between pieces, per cut
+    const parts = pieces.map((pc) => {
+      const p = pc.positions;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let i = 0; i < p.length; i += 3) {
+        if (p[i] < x0) x0 = p[i];
+        if (p[i] > x1) x1 = p[i];
+        if (p[i + 1] < y0) y0 = p[i + 1];
+        if (p[i + 1] > y1) y1 = p[i + 1];
+      }
+      let cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      planes.forEach((pl, k) => {
+        if (pl.axis === 'x') cx += (pc.side[k] * GAP) / 2 / s.x;
+        if (pl.axis === 'y') cy += (pc.side[k] * GAP) / 2 / s.y;
+      });
+      return { positions: p, cx, cy };
+    });
+    return { made: this.splitModel(model, parts), open };
+  }
+
   select(model) {
     this.selectMany(model ? [model] : [], model ?? null);
   }
@@ -1366,7 +1444,7 @@ export class Viewer extends EventTarget {
     if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) >= 5) return;
     const hit = this.pick(e);
     if (hit && !this.selection.has(hit.model)) this.select(hit.model);
-    this.emit('menu', { model: hit?.model ?? null, x: e.clientX, y: e.clientY });
+    this.emit('menu', { model: hit?.model ?? null, point: hit?.point ?? null, x: e.clientX, y: e.clientY });
   }
 
   // ---- Saving the plate in the browser (plate-store.js) --------------------------------------
