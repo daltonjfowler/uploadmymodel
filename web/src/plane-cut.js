@@ -6,6 +6,7 @@
 // No DOM, so Node tests load it. The cut faces are filled with three.js's own triangulation (earcut).
 
 import { ShapeUtils, Vector2 } from 'three';
+import { meshHealth } from './mesh-health.js';
 
 const AXES = { x: 0, y: 1, z: 2 };
 // The two other axes, in the order that makes "counter-clockwise" mean "facing +axis".
@@ -16,7 +17,8 @@ const PLANE = [[1, 2], [2, 0], [0, 1]];
  * @param {Float32Array} positions
  * @param {'x'|'y'|'z'} axisName
  * @param {number} at
- * @returns {{ below: Float32Array, above: Float32Array, open: boolean }} each side closed with a
+ * @returns {{ below: Float32Array, above: Float32Array, open: boolean, loops: number[][][] }} each side
+ *   closed with a cap (`loops`: the cut face's outlines and holes, 2D, in the plane's two other axes);
  *   cap; `open` when part of the cut could not be closed (the model has holes there)
  */
 export function cutMesh(positions, axisName, at) {
@@ -39,6 +41,9 @@ export function cutMesh(positions, axisName, at) {
     for (let k = 0; k < 3; k++) r[k] = k === a ? at : p[k] + (q[k] - p[k]) * t;
     return r;
   };
+  // Edges that lie exactly in the plane (a ring of the model's own corners): which sides they have
+  // triangles on. With triangles on both sides, the surface crosses there and the edge bounds the cut face.
+  const inPlane = new Map();
   for (let t = 0; t < tris; t++) {
     const o = t * 9;
     const P = [
@@ -48,6 +53,8 @@ export function cutMesh(positions, axisName, at) {
     ];
     const d = P.map((p) => p[a] - at);
     const on = d.map((x) => Math.abs(x) < eps);
+    // corners on the plane go exactly onto it, so they meet the cut face's corners bit for bit
+    for (let k = 0; k < 3; k++) if (on[k]) P[k][a] = at;
     const off = [0, 1, 2].filter((k) => !on[k]);
     const whole = (to) => to.push(...P[0], ...P[1], ...P[2]);
     if (!off.length) { // lying in the plane: it belongs to the piece it faces out of
@@ -58,6 +65,15 @@ export function cutMesh(positions, axisName, at) {
     }
     if (off.every((k) => d[k] < 0) || off.every((k) => d[k] > 0)) { // corners on the plane go with the rest
       whole(d[off[0]] < 0 ? below : above);
+      if (off.length === 1) { // an edge lying in the plane: part of the cut outline if the surface goes on past it
+        const k = off[0];
+        const p = P[(k + 1) % 3], q = P[(k + 2) % 3];
+        const kp = `${Math.round(p[u] * 1e5)},${Math.round(p[v] * 1e5)}`, kq = `${Math.round(q[u] * 1e5)},${Math.round(q[v] * 1e5)}`;
+        const ek = kp < kq ? `${kp}|${kq}` : `${kq}|${kp}`;
+        const e = inPlane.get(ek) ?? { below: 0, above: 0, seg: [p[u], p[v], q[u], q[v]] };
+        e[d[k] < 0 ? 'below' : 'above']++;
+        inPlane.set(ek, e);
+      }
       continue;
     }
     if (off.length === 2) { // one corner on the plane, one on each side: split through that corner
@@ -80,6 +96,7 @@ export function cutMesh(positions, axisName, at) {
     rest.push(...pAB, ...B, ...C, ...pAB, ...C, ...pAC);
     segs.push(pAB[u], pAB[v], pAC[u], pAC[v]);
   }
+  for (const e of inPlane.values()) if (e.below && e.above) segs.push(...e.seg);
   const { loops, open } = chain(segs);
   const caps = capTriangles(loops); // 2D triangles, counter-clockwise
   const to3 = (pu, pv) => {
@@ -93,7 +110,7 @@ export function cutMesh(positions, axisName, at) {
     below.push(...to3(...p), ...to3(...q), ...to3(...r)); // faces +axis: out of the piece below
     above.push(...to3(...p), ...to3(...r), ...to3(...q)); // faces -axis
   }
-  return { below: Float32Array.from(below), above: Float32Array.from(above), open };
+  return { below: Float32Array.from(below), above: Float32Array.from(above), open, loops };
 }
 
 /** Join cut lines end to end into closed loops. */
@@ -187,21 +204,36 @@ function capTriangles(loops) {
 
 /**
  * Cut with every plane in turn. Planes are {axis, at} in the model's own coordinates.
- * @returns {{ pieces: { positions: Float32Array, side: number[] }[], open: boolean }} `side` is -1 or
- *   +1 per plane (which side of it the piece is on), for moving the pieces apart
+ * `join(below, above, plane, loops)`, when given, may change the two sides of each cut (connectors) and
+ * return `{ below, above, extras }`; extras (loose dowel pins) come back in `extras`.
+ * @returns {{ pieces: { positions: Float32Array, side: number[] }[], open: boolean, extras: Float32Array[] }}
+ *   `side` is -1 or +1 per plane (which side of it the piece is on), for moving the pieces apart
  */
-export function cutByPlanes(positions, planes) {
+export function cutByPlanes(positions, planes, join = null) {
   let pieces = [{ positions, side: [] }];
   let open = false;
+  const extras = [];
   for (const pl of planes) {
     const next = [];
     for (const p of pieces) {
       const r = cutMesh(p.positions, pl.axis, pl.at);
       open ||= r.open && r.below.length > 0 && r.above.length > 0;
-      if (r.below.length) next.push({ positions: r.below, side: [...p.side, -1] });
-      if (r.above.length) next.push({ positions: r.above, side: [...p.side, 1] });
+      let { below, above } = r;
+      if (join && below.length && above.length && r.loops.length) {
+        const j = join(below, above, pl, r.loops);
+        ({ below, above } = j);
+        extras.push(...(j.extras ?? []));
+      }
+      if (below.length) next.push({ positions: below, side: [...p.side, -1] });
+      if (above.length) next.push({ positions: above, side: [...p.side, 1] });
     }
     pieces = next;
   }
-  return { pieces, open };
+  // Never say "filled" when it is not: compare the pieces' open edges with the model's own.
+  if (pieces.length > 1 && !open) {
+    const before = meshHealth(positions).openEdges;
+    const after = pieces.reduce((n, p) => n + meshHealth(p.positions).openEdges, 0);
+    if (after > before) open = true;
+  }
+  return { pieces, open, extras };
 }
