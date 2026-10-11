@@ -85,5 +85,60 @@ class Budget(unittest.TestCase):
         self.assertIn(f"export const LEASE_MS = {(server.SLICE_BUDGET_S + 30) * 1000:_};", line)
 
 
+class Admission(unittest.TestCase):
+    """At most the running slice + MAX_WAITING may read their upload; more get 503 before reading."""
+
+    def setUp(self):
+        import http.client
+        import json
+        import threading
+        from http.server import ThreadingHTTPServer
+        self.http, self.json = http.client, json
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.real_centred = server.centred_stl
+
+    def tearDown(self):
+        server.centred_stl = self.real_centred
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+    def post(self, body):
+        c = self.http.HTTPConnection("127.0.0.1", self.httpd.server_address[1], timeout=10)
+        c.request("POST", "/slice", body=body, headers={
+            "content-type": "model/stl", "x-cura-settings": self.json.dumps(server.CLASS_DEFAULT_SETTINGS)})
+        r = c.getresponse()
+        out = (r.status, self.json.loads(r.read() or b"{}"))
+        c.close()
+        return out
+
+    def test_warm_up_uses_the_class_default_quality(self):
+        self.assertEqual(server.check_settings(self.json.dumps(server.CLASS_DEFAULT_SETTINGS))[0], "standard")
+
+    def test_full_means_busy_without_reading_the_upload(self):
+        server.centred_stl = lambda data: self.fail("the upload was read")
+        for _ in range(1 + server.MAX_WAITING):
+            self.assertTrue(server.admitted.acquire(blocking=False))
+        try:
+            self.assertEqual(self.post(b"\0" * (2 * 1024 * 1024)), (503, {"error": "slicer busy"}))
+        finally:
+            for _ in range(1 + server.MAX_WAITING):
+                server.admitted.release()
+
+    def test_the_place_is_taken_before_the_upload_is_read_and_always_given_back(self):
+        seen = []
+
+        def centred(data):
+            # One place taken (this request) while the upload is turned into a model.
+            seen.append(server.admitted._value)
+            return self.real_centred(data)
+
+        server.centred_stl = centred
+        for _ in range(2 + server.MAX_WAITING):  # more than the places: each one was given back
+            self.assertEqual(self.post(STL)[0], 400)  # an empty model, refused after admission
+        self.assertEqual(seen, [server.MAX_WAITING] * (2 + server.MAX_WAITING))
+        self.assertEqual(server.admitted._value, 1 + server.MAX_WAITING)
+
+
 if __name__ == "__main__":
     unittest.main()

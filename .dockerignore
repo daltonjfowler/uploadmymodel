@@ -7,3 +7,4 @@
 !container/server.py
 !container/pause.py
 !container/arm_values.json
+!container/class_defaults.json

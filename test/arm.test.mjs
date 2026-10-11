@@ -48,6 +48,13 @@ test("the slicer's allow-list is exactly shared/arm.js (run scripts/arm-values.m
   assert.deepEqual(JSON.parse(readFileSync(new URL('../container/arm_values.json', import.meta.url), 'utf8')), armValues());
 });
 
+test("the slicer warms up the real class defaults (container/class_defaults.json; run scripts/arm-values.mjs after a change)", async () => {
+  const { toCuraOverrides } = await import('../shared/settings.js');
+  const warm = JSON.parse(readFileSync(new URL('../container/class_defaults.json', import.meta.url), 'utf8'));
+  assert.deepEqual(warm, toCuraOverrides(CLASS_DEFAULTS));
+  assert.equal(warm.quality_type, 'standard');
+});
+
 test('nothing on the tab can touch temperature, speed, flow, cooling, retraction, travel or G-code', () => {
   const forbidden = /temp|speed|flow|cool|fan|retract|travel|accel|jerk|gcode|sequence|machine_|material_|prime|wipe|hop|z_offset/;
   for (const key of ARM_SETTINGS.flatMap(curaKeys)) assert.doesNotMatch(key, forbidden, key);
@@ -191,4 +198,48 @@ test('custom layer heights stay inside 80% of the 0.50 mm nozzle (Cura warns pas
   assert.equal(Math.max(...layer), 0.4);
   for (const v of values('firstLayer')) assert.ok(v >= 0.2 && v <= 0.4, String(v));
   for (const v of values('thickTops')) assert.ok(v >= 0.8 && v <= 3, String(v));
+});
+
+// Code-review finding (2026-10): only walls / infill pattern were checked, so a teacher who locked
+// Layer height, Walls and Infill still got 0.10 mm layers, a thin first layer, thick tops and vase
+// mode (1 wall, no infill) through the ARM tab.
+const LOCKED_QWI = { ...DEFAULT_CLASS_CONFIG, open: { ...DEFAULT_CLASS_CONFIG.open, quality: false, walls: false, infillDensity: false } };
+
+test('a teacher lock on Layer height also locks custom layer height, first layer, adaptive layers and top/bottom thickness', async () => {
+  const { armWithinClass } = await import('../shared/arm.js');
+  const config = { ...DEFAULT_CLASS_CONFIG, open: { ...DEFAULT_CLASS_CONFIG.open, quality: false } };
+  const arm = { settings: { layerHeight: '0.10', firstLayer: '0.20', adaptive: 'on', thickTops: 'thick', fuzzy: 'on' }, pauses: [5] };
+  assert.deepEqual(armAgainstClass(arm, CLASS_DEFAULTS, config).sort(),
+    ['Adaptive layers', 'Custom layer height', 'First layer height', 'Top and bottom thickness']);
+  // What the page sends: only what the locks allow (the saved choice is kept for later).
+  assert.deepEqual(armWithinClass(arm, config), { settings: { fuzzy: 'on' }, pauses: [5] });
+  assert.deepEqual(arm.settings.layerHeight, '0.10');
+  // Nothing locked: everything goes.
+  assert.deepEqual(armAgainstClass(arm, CLASS_DEFAULTS, DEFAULT_CLASS_CONFIG), []);
+  assert.deepEqual(armWithinClass(arm, DEFAULT_CLASS_CONFIG), arm);
+});
+
+test('vase mode is locked by a lock on Walls OR Infill density; gradual infill by Infill density', () => {
+  for (const id of ['walls', 'infillDensity']) {
+    const config = { ...DEFAULT_CLASS_CONFIG, open: { ...DEFAULT_CLASS_CONFIG.open, [id]: false } };
+    assert.ok(armAgainstClass({ settings: { vase: 'on' } }, CLASS_DEFAULTS, config).includes('Vase mode'), id);
+  }
+  const config = { ...DEFAULT_CLASS_CONFIG, open: { ...DEFAULT_CLASS_CONFIG.open, infillDensity: false } };
+  assert.deepEqual(armAgainstClass({ settings: { gradual: '2' } }, CLASS_DEFAULTS, config), ['Gradual infill']);
+  assert.deepEqual(armAgainstClass({ settings: { vase: 'on', gradual: '2' } }, CLASS_DEFAULTS, DEFAULT_CLASS_CONFIG), []);
+});
+
+test('the Worker refuses each ARM way round the Layer height / Walls / Infill locks; nothing reaches the slicer', async () => {
+  for (const settings of [{ layerHeight: '0.10' }, { firstLayer: '0.20' }, { thickTops: 'thick' }, { vase: 'on' }, { adaptive: 'on' }, { gradual: '4' }]) {
+    const calls = fakeSlicer();
+    const res = await worker.fetch(await sliceRequest({ arm: { settings, pauses: [] }, key: 'test-arm-key' }), env({ config: LOCKED_QWI }));
+    assert.equal(res.status, 400, JSON.stringify(settings));
+    assert.ok((await res.json()).locked.length, JSON.stringify(settings));
+    assert.equal(calls.length, 0, JSON.stringify(settings));
+  }
+  // Extras that change none of the locked settings still work.
+  const calls = fakeSlicer();
+  const res = await worker.fetch(await sliceRequest({ arm: { settings: { fuzzy: 'on', ironing: 'on' }, pauses: [5] }, key: 'test-arm-key' }), env({ config: LOCKED_QWI }));
+  assert.equal(res.status, 200);
+  assert.equal(calls.length, 1);
 });

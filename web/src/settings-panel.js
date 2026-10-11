@@ -7,7 +7,9 @@ import {
   SUPPORT_CHOICES, TREE_SUPPORT_INFILL, applyClassLocks, isClassDefault, qualityById, summarize,
   validateClassConfig, validateSettings,
 } from '../../shared/settings.js';
-import { ARM_LABEL, ARM_PAUSES, ARM_SECTIONS, ARM_SETTINGS, activeArm, armIsUsed, summarizeArm, validateArm } from '../../shared/arm.js';
+import {
+  ARM_LABEL, ARM_PAUSES, ARM_SECTIONS, ARM_SETTINGS, activeArm, armIsUsed, armLockedByClass, armOverrides, armWithinClass, summarizeArm, validateArm,
+} from '../../shared/arm.js';
 import { el, esc } from './dom.js';
 import { patternIcon } from './pattern-icons.js';
 
@@ -102,9 +104,19 @@ export class SettingsPanel extends EventTarget {
     return { ...this.settings };
   }
 
+  /**
+   * The third tab's choices the teacher's locks allow: a choice that changes a locked setting (a
+   * custom layer height once Layer height is locked, vase mode once Walls or Infill is) is left
+   * out. this.arm (and the browser's copy) keeps it, for when the teacher opens the setting again.
+   */
+  get armActive() {
+    return armWithinClass(this.arm, this.config);
+  }
+
   /** The third tab's part of a slice, or null when it is locked or changes nothing. */
   get armValue() {
-    return this.armKey && armIsUsed(this.arm) ? { settings: { ...this.arm.settings }, pauses: [...this.arm.pauses] } : null;
+    const arm = this.armActive;
+    return this.armKey && armIsUsed(arm) ? arm : null;
   }
 
   setArm(next) {
@@ -155,12 +167,12 @@ export class SettingsPanel extends EventTarget {
   setClassConfig(input) {
     const v = validateClassConfig(input);
     if (!v.ok) return;
+    const before = JSON.stringify([this.settings, this.armValue]);
     this.config = v.config;
-    const before = JSON.stringify(this.settings);
     this.settings = applyClassLocks({ ...this.config.defaults, ...this.mine }, this.config);
     if (this.settings.support !== 'none') this.lastPlacement = this.settings.support;
     this.render();
-    if (JSON.stringify(this.settings) !== before) this.dispatchEvent(new Event('change'));
+    if (JSON.stringify([this.settings, this.armValue]) !== before) this.dispatchEvent(new Event('change'));
   }
 
   isLocked(id) {
@@ -209,7 +221,7 @@ export class SettingsPanel extends EventTarget {
     const focusKey = active ? `${active.tagName}|${active.getAttribute('aria-label') ?? active.textContent.trim()}` : null;
     const armOn = !!this.armValue;
     const changed = !isClassDefault(this.settings, this.config.defaults) || armOn;
-    const armWords = armOn ? summarizeArm(this.arm, this.settings) : '';
+    const armWords = armOn ? summarizeArm(this.armActive, this.settings) : '';
     this.root.classList.toggle('collapsed', !this.open);
     clearTimeout(this.hintTimer);
     this.hint.hidden = true; // its target is about to be replaced
@@ -345,7 +357,7 @@ export class SettingsPanel extends EventTarget {
 
   renderCustom(body, arm = false) {
     const s = this.settings;
-    const active = arm ? activeArm(this.arm, s) : {};
+    const active = arm ? activeArm(this.armActive, s) : {};
     const sections = arm
       ? [...ARM_SECTIONS.filter((x) => x.first), ...SECTIONS, ...ARM_SECTIONS.filter((x) => !x.first)]
       : SECTIONS;
@@ -442,6 +454,11 @@ export class SettingsPanel extends EventTarget {
   }
 
   armRow(def) {
+    if (armLockedByClass(def, this.config)) {
+      // The teacher locked a setting this one changes (vase mode changes Walls and Infill).
+      const names = armOverrides(def).filter((id) => this.isLocked(id)).map((id) => defOf(id).label.toLowerCase()).join(' and ');
+      return this.infoRow(def.label, def.options[0].label, `Your teacher locked ${names}, which this changes. ${def.help}`, true);
+    }
     const value = this.arm.settings[def.id] ?? 'profile';
     const row = el('div', { class: 'row' });
     row.append(el('span', { class: 'row-label' }, def.label));
@@ -504,7 +521,7 @@ export class SettingsPanel extends EventTarget {
       }
     }
     if (section === 'quality' && this.mode === 'arm') {
-      if (this.arm.settings.layerHeight) rows.append(this.customLayerRow());
+      if (this.armActive.settings.layerHeight) rows.append(this.customLayerRow());
     } else if (section === 'quality') {
       const q = qualityById(s.quality);
       rows.append(this.infoRow('First layer height', `${q.firstLayerMm.toFixed(2)} mm`, 'The first layer is thicker so it sticks to the bed. Comes with the layer height you pick.'));

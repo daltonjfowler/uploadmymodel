@@ -63,6 +63,17 @@
     </section>
   </main>
 
+  <dialog id="usbRestartDialog" class="dialog">
+    <form method="dialog">
+      <h2>Is the printer idle?</h2>
+      <p>Connecting restarts the printer. If it is printing right now, the print will stop. Is the printer idle?</p>
+      <div class="dialog-actions">
+        <button value="cancel" type="submit">Cancel</button>
+        <button value="ok" class="primary" type="submit">It is idle - connect</button>
+      </div>
+    </form>
+  </dialog>
+
   <footer class="footer">
     <span>Internal district tool.</span>
     <a href="/teacher/">Teacher</a>

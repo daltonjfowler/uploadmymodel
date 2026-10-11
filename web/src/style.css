@@ -399,7 +399,7 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 
 .keys td:first-child { color: var(--muted); width: 38%; }
 kbd { font: .8rem ui-monospace, Consolas, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--card2); }
 .dialog .note { margin-top: 12px; }
-.dialog-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+.dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 
 /* ---- Footer ---- */
 .footer {

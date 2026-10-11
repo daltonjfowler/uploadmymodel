@@ -72,6 +72,13 @@ with open(os.path.join(HERE, "arm_values.json"), encoding="utf-8") as _f:
 BED_Z = 285.0
 
 lock = threading.Lock()
+# The Worker's line (src/line.js) sends one slice at a time to each slicer. If the line fails, every
+# waiting slice comes straight here, and each one would read its whole upload (up to MAX_BODY, plus
+# a copy) into memory while it waits for the lock. So at most the running slice plus MAX_WAITING are
+# let in before their upload is read; any more get 503 "slicer busy" at once (the Worker turns that
+# into "very busy, try again in a minute").
+MAX_WAITING = 2
+admitted = threading.BoundedSemaphore(1 + MAX_WAITING)
 _help = subprocess.run([run.ENGINE, "help"], capture_output=True, text=True)
 _version = re.search(r"Cura_SteamEngine version \S+", _help.stdout + _help.stderr)
 ENGINE_VERSION = _version.group(0) if _version else "unknown"
@@ -194,6 +201,15 @@ def resolved(quality, user):
     return r
 
 
+def drain(stream, length, chunk=64 * 1024):
+    """Read and throw away `length` bytes of a request body without holding them."""
+    while length > 0:
+        got = stream.read(min(chunk, length))
+        if not got:
+            return
+        length -= len(got)
+
+
 def mesh_file_name(name):
     # The student's model name as a plain file name (the Worker already cleaned it; check again).
     clean = re.sub(r"[^a-z0-9-]+", "-", str(name or "").lower()).strip("-")[:30]
@@ -268,18 +284,26 @@ class Handler(BaseHTTPRequestHandler):
                 pauses = pause.check_pauses(self.headers.get("x-pauses"))
             except ValueError as e:
                 raise Refused(400, str(e))
-            t0 = time.time()
-            timings = {}
-            stl = centred_stl(self.rfile.read(length))
-            timings["model"] = time.time() - t0
-            # Whoever holds the lock is done within SLICE_BUDGET_S, so waiting longer means trouble.
-            if not lock.acquire(timeout=SLICE_BUDGET_S):
+            # A place before the upload is read (see MAX_WAITING); none free = busy, nothing read.
+            if not admitted.acquire(blocking=False):
+                drain(self.rfile, length)  # in small pieces, never kept: so the caller gets the 503
                 raise Refused(503, "slicer busy")
             try:
-                timings["queue"] = time.time() - t0 - timings["model"]
-                gcode, res, attempts = slice_plate(stl, quality, user, timings, self.headers.get("x-model-name"))
+                t0 = time.time()
+                timings = {}
+                stl = centred_stl(self.rfile.read(length))
+                timings["model"] = time.time() - t0
+                # Whoever holds the lock is done within SLICE_BUDGET_S, so waiting longer means trouble.
+                if not lock.acquire(timeout=SLICE_BUDGET_S):
+                    raise Refused(503, "slicer busy")
+                try:
+                    timings["queue"] = time.time() - t0 - timings["model"]
+                    gcode, res, attempts = slice_plate(stl, quality, user, timings, self.headers.get("x-model-name"))
+                finally:
+                    lock.release()
+                stl = None  # not needed any more: free it before the place is given back
             finally:
-                lock.release()
+                admitted.release()
             header = res["header"] or ""
             bad = outside_build_volume(gcode)
             if bad:
@@ -315,12 +339,10 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
 
-# The class settings as the Worker sends them (toCuraOverrides(CLASS_DEFAULTS)).
-CLASS_DEFAULT_SETTINGS = {
-    "quality_type": "high detail", "wall_line_count": 2, "infill_sparse_density": 20, "infill_pattern": "grid",
-    "support_enable": True, "support_structure": "tree", "support_type": "buildplate", "support_infill_rate": 0,
-    "support_angle": 60, "adhesion_type": "skirt",
-}
+# The class settings exactly as the Worker sends them: toCuraOverrides(CLASS_DEFAULTS), written from
+# shared/settings.js by scripts/arm-values.mjs (test/arm.test.mjs keeps them equal).
+with open(os.path.join(HERE, "class_defaults.json"), encoding="utf-8") as _f:
+    CLASS_DEFAULT_SETTINGS = json.load(_f)
 
 
 def warm_up():

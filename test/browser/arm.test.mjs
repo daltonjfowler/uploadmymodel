@@ -76,5 +76,20 @@ await page.waitForSelector('#action .result.ok', { timeout: 20000 });
 check('slice sends the password', sent?.key, KEY);
 check('slice sends the extras', sent?.arm, { settings: { fuzzy: 'on', morePatterns: 'cross_3d', layerHeight: '0.12', firstLayer: '0.30' }, pauses: [5] });
 check('result says where it pauses', /Colour change pause at 5 mm \(layer 18\)/.test(await page.$eval('#action .result.ok', (e) => e.textContent)), true);
+
+// The teacher locks Layer height: the saved custom height and first layer stop counting (they are
+// not sent and not shown), but stay saved for when the teacher opens it again.
+await page.evaluate(() => {
+  const p = window.umm.panel;
+  p.setClassConfig({ ...p.config, open: { ...p.config.open, quality: false } });
+});
+await page.waitForTimeout(150);
+check('locked quality: custom height row gone', await count('select[aria-label="Custom layer height"]'), 0);
+check('locked quality: first layer shown as locked', await count('select[aria-label="First layer height"]'), 0);
+check('locked quality: header has no custom height', /0\.12 mm layers/.test(await page.$eval('.settings-summary', (e) => e.textContent)), false);
+check('locked quality: the choice is still saved in the browser', await page.evaluate(() => JSON.parse(localStorage.getItem('umm.myArm')).settings.layerHeight), '0.12');
+await page.click('#action button.primary');
+await page.waitForSelector('#action .result.ok', { timeout: 20000 });
+check('locked quality: slice sends neither', sent?.arm, { settings: { fuzzy: 'on', morePatterns: 'cross_3d' }, pauses: [5] });
 console.log(errors.join('\n') || 'no errors');
 await browser.close();

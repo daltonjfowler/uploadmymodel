@@ -24,7 +24,9 @@ await ctx.addInitScript(() => {
       if (saving) {
         if (/M29(?!\d)/.test(line)) { saving = false; return say('Done saving file.', 'ok P15 B3'); }
         window.__printer.written.push(line);
-        return say('ok P15 B3');
+        // hold: the printer stops answering, so a copy stays "working" until the test lets go.
+        const reply = () => (window.__printer.hold ? setTimeout(reply, 50) : say('ok P15 B3'));
+        return reply();
       }
       if (line === 'M115' && !port.spared) { port.spared = true; say('echo:SD card ok', 'X:-50.00 Y:-17.00 Z:297.00', 'ok P15 B2'); } // like the school Workhorse
       if (line === 'M115') return say('FIRMWARE_NAME:Marlin  FIRMWARE_VERSION:2.0.9.0.13 MACHINE_TYPE:TAZ Workhorse Edition', 'Cap:SDCARD:1', 'Cap:SD_WRITE:1', 'ok P15 B3');
@@ -55,7 +57,8 @@ await ctx.addInitScript(() => {
     };
     return port;
   };
-  Object.defineProperty(navigator, 'serial', { value: { requestPort: async () => makePort() } });
+  window.__asked = 0;
+  Object.defineProperty(navigator, 'serial', { value: { requestPort: async () => { window.__asked++; return makePort(); } } });
 });
 await ctx.route('**/api/slicing', (r) => r.fulfill({ json: { engine: false, open: false, until: null } }));
 await ctx.route('**/api/slice', (r) => r.fulfill({
@@ -72,7 +75,21 @@ await page.click('#action button.primary');
 const copy = page.locator('#usbBox button', { hasText: 'Copy to printer' });
 await copy.waitFor({ timeout: 20000 });
 check('Copy to printer button shows next to Save', await copy.isVisible(), true);
+// Opening the port restarts the printer: the student must say it is idle first.
 await copy.click();
+await page.waitForSelector('#usbRestartDialog[open]', { timeout: 5000 });
+check('restart warning names the stopped print', /print will stop/.test(await page.$eval('#usbRestartDialog', (e) => e.textContent)), true);
+await page.click('#usbRestartDialog button[value="cancel"]');
+await page.waitForTimeout(300);
+check('Cancel: no printer asked for', await page.evaluate(() => window.__asked), 0);
+check('Cancel: Save and Copy still there', [await page.locator('#action button', { hasText: 'Save to SD card' }).isVisible(), await copy.isVisible()], [true, true]);
+await copy.click();
+await page.waitForSelector('#usbRestartDialog[open]', { timeout: 5000 });
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+check('Esc: no printer asked for', await page.evaluate(() => window.__asked), 0);
+await copy.click();
+await page.click('#usbRestartDialog button[value="ok"]');
 await page.waitForSelector('#usbBox .advice', { timeout: 60000 });
 const msg = await page.$eval('#usbBox .advice', (e) => e.textContent);
 check('saved under a new short name', /Saved on the printer as JORDAN02\.GCO/.test(msg), true);
@@ -80,6 +97,22 @@ const pr = await page.evaluate(() => window.__printer);
 check('file name on the card', pr.savedAs, 'JORDAN02.GCO');
 check('every line written (comments dropped)', pr.written.length, 2003);
 check('nothing was run on the printer', pr.run, []);
+
+// The plate changes during a copy: the old file cannot be saved, and it is dropped when the copy ends.
+await page.evaluate(() => { window.__printer.hold = true; });
+await copy.click();
+await page.click('#usbRestartDialog button[value="ok"]');
+await page.waitForFunction(() => /Copying as/.test(document.querySelector('#usbStatus')?.textContent ?? ''), null, { timeout: 30000 });
+await page.evaluate(() => window.umm.viewer.nudge(window.umm.viewer.models[0], 1, 0));
+await page.waitForTimeout(200);
+check('during the copy: old file cannot be saved', await page.locator('#action button', { hasText: 'Save to SD card' }).count(), 0);
+check('during the copy: says the file is old', /file is the old one/.test(await page.$eval('#action', (e) => e.textContent)), true);
+check('during the copy: copy keeps going', await page.locator('#usbStatus').count(), 1);
+await page.evaluate(() => { window.__printer.hold = false; });
+await page.waitForSelector('#usbStatus', { state: 'detached', timeout: 60000 });
+await page.waitForTimeout(200);
+check('after the copy: old file dropped (Slice shows again)', [await page.locator('#action button', { hasText: 'Save to SD card' }).count(), await page.locator('#action button.primary', { hasText: 'Slice' }).count()], [0, 1]);
+check('after the copy: told to slice again', /slice again/.test(await page.$eval('#toasts', (e) => e.textContent)), true);
 await page.screenshot({ path: 'test/browser/.out/usbcopy.png' }).catch(() => {});
 console.log(errors.join('\n') || 'no errors');
 await browser.close();

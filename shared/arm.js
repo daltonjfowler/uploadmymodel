@@ -50,17 +50,17 @@ export const ARM_SETTINGS = [
   // "Custom…" under Layer height (Dalton 2026-09-28). 0.10 to 0.40 mm: Cura warns past 80% of the
   // 0.50 mm nozzle (Dalton agreed to keep that cap). Speeds and temperatures still come from a LulzBot profile: the page picks the
   // nearest one (Fine detail / Standard / Fast) as the base.
-  { id: 'layerHeight', section: 'quality', label: 'Custom layer height', cura: 'layer_height', merged: true,
+  { id: 'layerHeight', section: 'quality', label: 'Custom layer height', cura: 'layer_height', overrides: 'quality', merged: true,
     options: [profile('Use the profile'), ...Array.from({ length: 16 }, (_, i) => {
       const mm = Math.round((0.1 + i * 0.02) * 100) / 100;
       return opt(mm.toFixed(2), `${mm.toFixed(2)} mm`, mm, mm < 0.16 ? 'Super thin: very smooth, very slow.' : mm > 0.32 ? 'Thick: fast, you can see the lines.' : 'In between.');
     })],
     help: 'Pick any layer height from 0.10 to 0.40 mm.' },
-  { id: 'firstLayer', section: 'quality', label: 'First layer height', cura: 'layer_height_0',
+  { id: 'firstLayer', section: 'quality', label: 'First layer height', cura: 'layer_height_0', overrides: 'quality',
     options: [profile('From the layer height'), ...[0.2, 0.25, 0.3, 0.35, 0.4].map((mm) => opt(mm.toFixed(2), `${mm.toFixed(2)} mm`, mm,
       mm < 0.3 ? 'Thinner first layer: sharper bottom edge, a bit harder to stick.' : mm > 0.35 ? 'Thicker first layer: sticks best on a bumpy bed.' : 'Normal.'))],
     help: 'How thick the very first layer is. A thicker first layer sticks to the bed more easily.' },
-  { id: 'adaptive', section: 'quality', label: 'Adaptive layers', cura: 'adaptive_layer_height_enabled',
+  { id: 'adaptive', section: 'quality', label: 'Adaptive layers', cura: 'adaptive_layer_height_enabled', overrides: 'quality',
     options: onOff('Thinner layers on curvy parts, thicker on straight parts. Smooth and still quick.', 'Every layer the same height.'),
     help: 'Lets the slicer change the layer height as it goes up your model.' },
 
@@ -78,7 +78,7 @@ export const ARM_SETTINGS = [
     help: 'Wall counts that Custom does not offer.' },
   // The LulzBot quality files set top_thickness / bottom_thickness themselves, so set both (the
   // parent top_bottom_thickness would be ignored).
-  { id: 'thickTops', section: 'quality', label: 'Top and bottom thickness', cura: ['top_thickness', 'bottom_thickness'],
+  { id: 'thickTops', section: 'quality', label: 'Top and bottom thickness', cura: ['top_thickness', 'bottom_thickness'], overrides: 'quality',
     options: [profile('From the layer height'), opt('thin', 'Thin (0.8 mm)', 0.8, 'Less plastic. Tops may show the infill.'),
       opt('1.0', '1.0 mm', 1, 'A little thinner than normal.'), opt('1.5', '1.5 mm', 1.5, 'A little thicker than normal.'),
       opt('thick', 'Thick (2.0 mm)', 2, 'Strong, smooth tops.'), opt('extra', 'Extra thick (3.0 mm)', 3, 'Very strong tops and bottoms.')],
@@ -93,11 +93,12 @@ export const ARM_SETTINGS = [
       opt('tetrahedral', 'Octet', 'tetrahedral', 'Pyramids and diamonds. Very strong.'),
       opt('cubicsubdiv', 'Cubic subdivision', 'cubicsubdiv', 'Big cubes in the middle, small ones near the walls. Saves plastic.')],
     help: 'Extra shapes for the inside of your print. Look at them in the Preview tab!' },
-  { id: 'gradual', section: 'infill', label: 'Gradual infill', cura: 'gradual_infill_steps',
+  { id: 'gradual', section: 'infill', label: 'Gradual infill', cura: 'gradual_infill_steps', overrides: 'infillDensity',
     options: [profile('Off'), opt('2', '2 steps', 2, 'Sparse at the bottom, denser near the top.'), opt('4', '4 steps', 4, 'Even more steps. Saves lots of plastic.')],
     help: 'Uses less infill low down and more just under the top, where it holds the top up.' },
 
-  { id: 'vase', section: 'special', label: 'Vase mode', cura: 'magic_spiralize',
+  // Spiralize prints one wall and no infill, whatever Walls and Infill say.
+  { id: 'vase', section: 'special', label: 'Vase mode', cura: 'magic_spiralize', overrides: ['walls', 'infillDensity'],
     options: onOff('One single wall that spirals up without stopping. No top, no infill: perfect vases and cups.', 'Normal print.'),
     help: 'Called "spiralize" in Cura. Only for simple shapes, and the model must be one piece.' },
   { id: 'mold', section: 'special', label: 'Mold maker', cura: 'mold_enabled',
@@ -199,12 +200,38 @@ export function toArmOverrides(arm, base) {
   return out;
 }
 
+/**
+ * The base settings (shared/settings.js SETTINGS ids) an ARM setting replaces or changes, so a
+ * teacher's lock on any of them also locks it: a custom layer height, first layer, adaptive layers
+ * and top/bottom thickness all change Layer height ('quality'); vase mode forces one wall and no
+ * infill. `overrides` is one id or a list.
+ */
+export const armOverrides = (def) => [def?.overrides ?? []].flat();
+
+/** Is this ARM setting off-limits because the teacher locked a base setting it changes? */
+export function armLockedByClass(def, config) {
+  return !!config?.open && armOverrides(def).some((id) => !config.open[id]);
+}
+
 /** Labels of ARM choices that replace a base setting the teacher locked (the Worker refuses those). */
 export function armAgainstClass(arm, base, config) {
   return Object.keys(activeArm(arm, base))
     .map(armDef)
-    .filter((d) => d.overrides && config?.open && !config.open[d.overrides])
+    .filter((d) => armLockedByClass(d, config))
     .map((d) => d.label);
+}
+
+/**
+ * The ARM part with every choice the teacher's locks rule out left out (the page sends this, so a
+ * choice saved in the browser before the teacher locked a setting never reaches the slicer). The
+ * saved choice itself is kept: it comes back if the teacher opens the setting again.
+ */
+export function armWithinClass(arm, config) {
+  const settings = {};
+  for (const [id, v] of Object.entries(arm?.settings ?? {})) {
+    if (!armLockedByClass(armDef(id), config)) settings[id] = v;
+  }
+  return { settings, pauses: [...(arm?.pauses ?? [])] };
 }
 
 /** { curaKey: [allowed values] } for the slicer's own check (container/arm_values.json). */

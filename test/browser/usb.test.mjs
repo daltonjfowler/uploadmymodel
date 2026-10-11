@@ -63,7 +63,14 @@ const check = (name, got, want) => { const ok = JSON.stringify(got) === JSON.str
 
 let res = await page.goto(base + 'usb-test/');
 check('page allows Web Serial for itself', res.headers()['permissions-policy'].includes('serial=(self)'), true);
+// Connecting restarts the printer: the teacher says it is idle first; Cancel opens nothing.
 await page.click('#connect');
+await page.waitForSelector('#usbRestartDialog[open]', { timeout: 5000 });
+await page.click('#usbRestartDialog button[value="cancel"]');
+await page.waitForTimeout(300);
+check('Cancel: no port opened', [await page.evaluate(() => window.__bauds ?? []), await page.$eval('#state', (e) => e.textContent)], [[], 'Not connected.']);
+await page.click('#connect');
+await page.click('#usbRestartDialog button[value="ok"]');
 await page.waitForSelector('#state[data-tone="ok"]', { timeout: 30000 });
 check('Workhorse: waits out the boot at 250000', await page.$eval('#state', (e) => e.textContent), 'Connected at 250000. The printer answered.');
 check('Workhorse: never switched speed', await page.evaluate(() => window.__bauds), [250000]);
@@ -71,6 +78,7 @@ check('Workhorse: never switched speed', await page.evaluate(() => window.__baud
 res = await page.goto(base + 'usb-test/');
 await page.evaluate(() => { window.__printer = { baud: 115200, bootMs: 300 }; window.__bauds = []; window.__sent = []; });
 await page.click('#connect');
+await page.click('#usbRestartDialog button[value="ok"]');
 await page.waitForSelector('#state[data-tone="ok"]', { timeout: 60000 });
 check('fell back to 115200', await page.$eval('#state', (e) => e.textContent), 'Connected at 115200. The printer answered.');
 check('tried 250000 first', await page.evaluate(() => window.__bauds), [250000, 115200]);

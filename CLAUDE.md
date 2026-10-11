@@ -80,6 +80,9 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   when a request has none), so kids never lock out the class or teacher. Class phrase and teacher key
   counted apart: 5 wrong in a row lock 5 s, each further wrong doubles it (cap 300 s), a right answer
   clears it. Checked AFTER `SLICE_RATE_IP`, BEFORE the compare; Cache API, falls open.
+  Teacher key and ARM password also count WRONG tries per address (`src/keyguard.js`,
+  `WRONG_KEY_RATE_IP` 20/min; right keys never count): past it the address is refused for 60 s
+  without comparing. `workers_dev` is off because the Cache API does nothing on workers.dev.
 - Every slice needs the page's ticket (`x-slice-ticket`). The line only gives a slicer to a page
   that is still asking for its place, and frees a slot when the page stops asking or the browser
   goes away (`request.signal`, `enable_request_signal`). `LEASE_MS` = `SLICE_BUDGET_S` + 30 s.
@@ -91,7 +94,9 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
 - The third settings tab, "Assistant to the Regional Manager" (shared/arm.js), unlocks with the
   ARM_KEY Worker secret (never in this public repo). Its list is checked in the page, the Worker and
   the container (container/arm_values.json from scripts/arm-values.mjs; test/arm.test.mjs keeps them
-  equal). Never add temperatures, speeds, flow, cooling, retraction, travel or G-code to it. Colour
+  equal; the same script writes container/class_defaults.json, the slicer's warm-up settings). An
+  ARM setting that changes a base setting has `overrides` (one id or a list): a teacher lock on that
+  setting locks it too (page leaves it out, Worker refuses it). Never add temperatures, speeds, flow, cooling, retraction, travel or G-code to it. Colour
   change pauses: container/pause.py (Cura LE's Marlin M0 pause, not M600; parks away from the
   print, frees only the E motor, re-waits for the nozzle temperature, restores G92 E and M82/M83;
   tests: `python container/test_pause.py`). The container refuses

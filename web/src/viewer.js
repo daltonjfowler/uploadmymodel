@@ -15,6 +15,7 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import { LINE_TYPES } from './gcode.js';
 import { cutByPlanes } from './plane-cut.js';
+import { LIMITS } from '../../shared/settings.js';
 
 // Picking a 500k-triangle model by testing every triangle takes ~0.25 s on a slow Chromebook, too
 // slow for hover and drag. three-mesh-bvh (MIT) builds a search tree per model instead. Building
@@ -692,6 +693,8 @@ export class Viewer extends EventTarget {
   splitModel(model, parts) {
     const index = this.models.indexOf(model);
     if (index < 0 || parts.length < 2) return [];
+    // Never past the slicer's limit (the Worker would refuse the plate at Slice): nothing changes.
+    if (this.trianglesAfterSplit(model, parts) > LIMITS.maxTriangles) return [];
     const s = model.mesh.scale;
     const made = parts.map((p, i) => {
       const m = new Model(`${model.name} ${i + 1}`, p.positions);
@@ -731,6 +734,12 @@ export class Viewer extends EventTarget {
     this.selectMany(made, made.at(-1));
     this.changed();
     return made;
+  }
+
+  /** Triangles on the whole plate if `model` were swapped for `parts` ({ positions } each). */
+  trianglesAfterSplit(model, parts) {
+    const plate = this.models.reduce((n, m) => n + m.triangles, 0);
+    return plate - model.triangles + parts.reduce((n, p) => n + p.positions.length / 9, 0);
   }
 
   // ---- Split by plane (plane-cut.js) ----------------------------------------------------------
@@ -807,6 +816,9 @@ export class Viewer extends EventTarget {
       });
       return { positions: p, cx, cy };
     });
+    // Filled cut faces add triangles: over the slicer's limit, cut nothing and say how many.
+    const triangles = this.trianglesAfterSplit(model, parts);
+    if (triangles > LIMITS.maxTriangles) return { made: [], open, triangles };
     return { made: this.splitModel(model, parts), open };
   }
 

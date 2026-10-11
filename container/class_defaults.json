@@ -1,0 +1,13 @@
+{
+ "quality_type": "standard",
+ "wall_line_count": 2,
+ "infill_sparse_density": 20,
+ "infill_pattern": "grid",
+ "support_enable": true,
+ "support_structure": "tree",
+ "support_type": "buildplate",
+ "support_infill_rate": 0,
+ "support_angle": 60,
+ "adhesion_type": "skirt",
+ "material": "polylite_pla"
+}

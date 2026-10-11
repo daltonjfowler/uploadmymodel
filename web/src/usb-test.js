@@ -4,7 +4,7 @@
 // "print from USB" should work (docs/USB_PRINTING.md).
 
 import './style.css';
-import { $, el } from './dom.js';
+import { $, confirmDialog, el } from './dom.js';
 import { initThemeButton } from './theme.js';
 
 initThemeButton($('#theme'));
@@ -174,6 +174,8 @@ $('#connect').addEventListener('click', async () => {
     state('This browser cannot use USB serial. Use Chrome on a Chromebook or computer.', 'error');
     return;
   }
+  // Opening the port restarts the Workhorse, which would stop a running print.
+  if (!(await confirmDialog($('#usbRestartDialog')))) return;
   let chosen;
   try {
     chosen = await navigator.serial.requestPort({});

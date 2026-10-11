@@ -18,6 +18,19 @@ export function esc(text) {
   return String(text).replace(/[&<>"']/g, (c) => ESCAPES[c]);
 }
 
+/**
+ * Show a <dialog> whose form buttons have value="ok" / value="cancel". Resolves true only for "ok":
+ * Cancel, Esc and anything else are false (returnValue is cleared first, because Esc keeps the
+ * value from the last time the dialog closed).
+ */
+export function confirmDialog(dialog) {
+  dialog.returnValue = '';
+  dialog.showModal();
+  return new Promise((resolve) => {
+    dialog.addEventListener('close', () => resolve(dialog.returnValue === 'ok'), { once: true });
+  });
+}
+
 export function $(selector) {
   return document.querySelector(selector);
 }

@@ -495,3 +495,118 @@ test('teacher key lockout is per device too: a student cannot lock the teacher o
   assert.equal((await get('test-teacher-key-123', student)).status, 429);
   assert.equal((await get('test-teacher-key-123', teacher)).status, 200);
 });
+
+// Fake Cloudflare rate-limit binding: `limit` calls per key, then refuses. Records every key asked.
+function fakeLimiter(limit) {
+  const counts = new Map();
+  const asked = [];
+  return {
+    asked,
+    async limit({ key }) {
+      asked.push(key);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+      return { success: counts.get(key) <= limit };
+    },
+  };
+}
+
+test('wrong teacher keys count per address (made-up device ids do not help); right keys never count', async () => {
+  const { resetKeyguard } = await import('../src/keyguard.js');
+  resetKeyguard();
+  const store = memoryStore();
+  const limiter = fakeLimiter(3);
+  const e = { ...env(), TEACHER_KEY: 'test-teacher-key-123', lockoutStore: store, WRONG_KEY_RATE_IP: limiter };
+  let n = 0;
+  const get = (key, ip = '198.51.100.20') => worker.fetch(new Request('https://uploadmymodel.com/api/teacher/class', {
+    // A new random device id every time: the per-device lockout never sees 5 in a row.
+    headers: { 'x-teacher-key': key, 'x-client-id': `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`, 'cf-connecting-ip': ip },
+  }), e);
+  assert.equal((await get('test-teacher-key-123')).status, 200);
+  assert.equal(limiter.asked.length, 0, 'a right key is never counted');
+  for (let i = 1; i <= 3; i++) assert.equal((await get('guess')).status, 401, `wrong ${i}`);
+  const over = await get('guess');
+  assert.equal(over.status, 429);
+  assert.equal((await over.json()).error, 'locked');
+  // The right key still works from this address (Dalton 2026-09-28: a student must never lock the
+  // teacher out; the whole school shares one address). Only wrong keys are refused once over.
+  assert.equal((await get('test-teacher-key-123')).status, 200, 'right key still works');
+  assert.equal((await get('guess')).status, 429, 'wrong keys still refused');
+  assert.equal(limiter.asked.length, 5, 'only the 5 wrong keys were counted');
+  assert.deepEqual([...new Set(limiter.asked)], ['teacher 198.51.100.20']);
+  // Another address is not affected.
+  assert.equal((await get('guess', '198.51.100.21')).status, 401);
+});
+
+test('wrong ARM passwords count per address too, apart from teacher keys', async () => {
+  const { resetKeyguard } = await import('../src/keyguard.js');
+  resetKeyguard();
+  const limiter = fakeLimiter(2);
+  const e = { ...env(), ARM_KEY: 'arm-secret-xyz', lockoutStore: memoryStore(), WRONG_KEY_RATE_IP: limiter };
+  let n = 0;
+  const post = (key) => worker.fetch(new Request('https://uploadmymodel.com/api/arm', {
+    method: 'POST',
+    headers: { 'x-arm-key': key, 'x-client-id': `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`, 'cf-connecting-ip': '198.51.100.30' },
+  }), e);
+  assert.equal((await post('arm-secret-xyz')).status, 200);
+  assert.equal((await post('nope')).status, 403);
+  assert.equal((await post('nope')).status, 403);
+  assert.equal((await post('nope')).status, 429);
+  assert.equal((await post('arm-secret-xyz')).status, 200, 'the right password still works');
+  assert.deepEqual(limiter.asked, ['arm 198.51.100.30', 'arm 198.51.100.30', 'arm 198.51.100.30']);
+});
+
+test('wrong-key limit falls open when the cache and the binding fail', async () => {
+  const { resetKeyguard } = await import('../src/keyguard.js');
+  resetKeyguard();
+  const e = {
+    ...env(), TEACHER_KEY: 'test-teacher-key-123', lockoutStore: memoryStore({ fail: true }),
+    WRONG_KEY_RATE_IP: { limit: async () => { throw new Error('down'); } },
+  };
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const get = (key) => worker.fetch(new Request('https://uploadmymodel.com/api/teacher/class', {
+      headers: { 'x-teacher-key': key, 'cf-connecting-ip': '198.51.100.40' },
+    }), e);
+    assert.equal((await get('guess')).status, 401);
+    assert.equal((await get('test-teacher-key-123')).status, 200);
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("the teacher's locks never fail open: a broken class-setup read refuses the slice (503)", async () => {
+  const calls = fakeSlicer();
+  const e = env();
+  const get = e.CLASS_KV.get;
+  e.CLASS_KV.get = async (k) => { if (k === 'class') throw new Error('KV down'); return get(k); };
+  e.TEACHER_KEY = 'test-teacher-key-123';
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const res = await worker.fetch(await sliceRequest(), e);
+    assert.equal(res.status, 503);
+    assert.match((await res.json()).message, /could not be read/);
+    assert.equal(calls.length, 0, 'nothing reached the slicer');
+    // The teacher page does not get the open defaults either (saving them would wipe the setup).
+    const t = await worker.fetch(new Request('https://uploadmymodel.com/api/teacher/class', {
+      headers: { 'x-teacher-key': 'test-teacher-key-123', 'cf-connecting-ip': '198.51.100.50' },
+    }), e);
+    assert.equal(t.status, 503);
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test('a slicer with too many waiting ("slicer busy", 503) becomes a friendly try-again', async () => {
+  globalThis.fetch = async () => new Response('{"error": "slicer busy"}', { status: 503 });
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const res = await worker.fetch(await sliceRequest(), env());
+    assert.equal(res.status, 503);
+    assert.equal((await res.json()).message, 'The slicer is very busy right now. Wait a minute and try again.');
+  } finally {
+    console.error = quiet;
+  }
+});

@@ -165,6 +165,17 @@
     </form>
   </dialog>
 
+  <dialog id="usbRestartDialog" class="dialog">
+    <form method="dialog">
+      <h2>Is the printer idle?</h2>
+      <p>Copying restarts the printer. If it is printing right now, the print will stop. Is the printer idle?</p>
+      <div class="dialog-actions">
+        <button value="cancel" type="submit">Cancel</button>
+        <button value="ok" class="primary" type="submit">It is idle - copy</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="printerDialog" class="dialog">
     <form method="dialog">
       <h2>Class printer</h2>

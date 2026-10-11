@@ -4,7 +4,7 @@
 
 import './style.css';
 import { LIMITS, PRINTER, formatMinutes, gcodeFileName, materialById, summarize } from '../../shared/settings.js';
-import { $, el, esc, fmt } from './dom.js';
+import { $, confirmDialog, el, esc, fmt } from './dom.js';
 import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.js';
 import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
 import { meshHealth } from './mesh-health.js';
@@ -47,6 +47,7 @@ function askPhrase(error) {
   input.value = error ? '' : storedPhrase();
   $('#phraseError').hidden = !error;
   $('#phraseError').textContent = error ?? '';
+  dialog.returnValue = ''; // Esc keeps the last value: without this, Esc after an earlier OK slices
   dialog.showModal();
   input.focus();
   // Enter means "Slice" (the form's first button is Cancel).
@@ -422,7 +423,16 @@ function renderTools() {
     const grid = el('div', { class: 'fields two' });
     for (const axis of ['x', 'y', 'z']) {
       grid.append(
-        numberField(axis.toUpperCase(), s[axis], (v) => v > 0 && apply(axis, v / m.size[axis]), { min: 0.1 }),
+        numberField(axis.toUpperCase(), s[axis], (v) => {
+          if (!(v > 0)) return;
+          // A flat model (0 mm on this axis) cannot be scaled to a size: v / 0 is Infinity.
+          if (!(m.size[axis] > 0.0001)) {
+            toast(`This model is flat in ${axis.toUpperCase()}, so its ${axis.toUpperCase()} size cannot change.`, { kind: 'warn' });
+            renderTools();
+            return;
+          }
+          apply(axis, v / m.size[axis]);
+        }, { min: 0.1 }),
         numberField('', sc[axis] * 100, (v) => v > 0 && apply(axis, v / (sc[axis] * 100)), { unit: '%', min: 1, digits: 0 }),
       );
     }
@@ -556,6 +566,12 @@ async function splitSelected({ loose = false } = {}) {
     toast(`Splitting makes ${total} objects, and the most for one plate is ${LIMITS.maxObjects}. Remove some first, or print this one as it is.`, { kind: 'error', timeout: 10000 });
     return;
   }
+  const tris = viewer.models.reduce((n, m) => n + m.triangles, 0)
+    + plan.reduce((n, { m, parts }) => n + parts.reduce((k, p) => k + p.positions.length / 9, 0) - m.triangles, 0);
+  if (tris > LIMITS.maxTriangles) {
+    toast(`Split, the plate would have too much detail to slice (${fmt(tris)} triangles, the most is ${fmt(LIMITS.maxTriangles)}). Remove a model first.`, { kind: 'error', timeout: 10000 });
+    return;
+  }
   const made = [];
   viewer.transaction('split', () => {
     for (const { m, parts } of plan) made.push(...viewer.splitModel(m, parts));
@@ -630,7 +646,12 @@ async function applyCut() {
   } finally {
     busy(null);
   }
-  const { made, open } = result;
+  const { made, open, triangles } = result;
+  if (triangles) {
+    // Checked before anything was cut: the plate is as it was.
+    toast(`Cut, the plate would have too much detail to slice (${fmt(triangles)} triangles, the most is ${fmt(LIMITS.maxTriangles)}). Remove a model or use fewer planes.`, { kind: 'error', timeout: 10000 });
+    return;
+  }
   if (!made.length) {
     toast('The planes miss the model, so nothing was cut. Slide a plane onto the model.', { timeout: 8000 });
     return;
@@ -955,6 +976,13 @@ function renderAction() {
       <p>The slicing engine is not connected yet. It is the next thing being built. Soon this button makes
       <code>${esc(slice.fileName ?? fileName())}</code> for the SD card.</p>`;
     card.append(r);
+  } else if (slice.state === 'done' && slice.download && slice.stale) {
+    // The plate or settings changed during a USB copy: this file is the OLD one. The copy keeps
+    // going (stopping it is the student's choice), but it cannot be saved again, and it is
+    // dropped when the copy ends (copyToPrinter).
+    card.append(el('p', { class: 'advice warn' }, 'Your model or settings changed. This file is the old one, so slice again after the copy.'));
+    card.append(usbBox());
+    return;
   } else if (slice.state === 'done' && slice.download) {
     const r = el('div', { class: 'result ok' });
     r.innerHTML = `<strong>✓ Ready for the SD card</strong>${slice.stats ? `<p>${esc(slice.stats)}</p>` : ''}${slice.pauses?.text ? `<p>🎨 ${esc(slice.pauses.text)}</p>` : ''}`;
@@ -1020,15 +1048,20 @@ function paintUsb() {
 }
 
 async function copyToPrinter() {
-  if (!slice.blob || usb.state === 'working') return;
+  if (!slice.blob || slice.stale || usb.state === 'working') return;
+  const blob = slice.blob;
   let lines;
   try {
-    lines = cardLines(await slice.blob.text());
+    lines = cardLines(await blob.text());
   } catch (err) {
     usb = { state: 'error', message: err.message };
     renderAction();
     return;
   }
+  // Opening the USB port restarts the Workhorse, which would stop a running print, and nothing can
+  // ask the printer before that restart. So the student says it is idle first. Cancel changes nothing.
+  if (!(await confirmDialog($('#usbRestartDialog')))) return;
+  if (slice.blob !== blob || slice.stale || usb.state === 'working') return; // changed meanwhile
   let port;
   try {
     port = await navigator.serial.requestPort({});
@@ -1073,6 +1106,12 @@ async function copyToPrinter() {
     usbAbort = null;
     await printer.close();
   }
+  if (slice.stale) {
+    // The plate changed during the copy: drop the old file now, but keep the copy's answer.
+    const { state, message } = usb;
+    invalidateSlice();
+    toast(`${message} Your model changed during the copy: slice again for a new file.`, { kind: state === 'error' ? 'warn' : 'info', timeout: 15000 });
+  }
   renderAction();
 }
 
@@ -1116,7 +1155,12 @@ panel.addEventListener('armunlock', async (e) => {
 });
 
 function invalidateSlice() {
-  if (usb.state === 'working') return; // never drop the file in the middle of a copy
+  if (usb.state === 'working') {
+    // Never drop the file in the middle of a copy, but mark it old: no saving it, and
+    // copyToPrinter drops it when the copy ends.
+    if (slice.state === 'done') slice.stale = true;
+    return;
+  }
   usb = { state: 'idle' };
   if (slice.state === 'slicing') sliceAbort?.abort();
   if (slice.url) URL.revokeObjectURL(slice.url);
@@ -1238,7 +1282,7 @@ async function watchLine(ticket) {
 // (Chromebooks too) shows a real save dialog, so the student picks the SD card and sees the name;
 // other browsers download it.
 async function downloadResult() {
-  if (!slice.url) return;
+  if (!slice.url || slice.stale) return;
   const name = fileName();
   if (window.showSaveFilePicker && slice.blob) {
     try {

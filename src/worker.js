@@ -21,6 +21,7 @@ import { armAgainstClass, armIsUsed, toArmOverrides, validateArm } from '../shar
 import { MAX_PHRASE, MIN_PHRASE, generatePhrase, normalizePhrase, validateOpenRequest } from '../shared/slicing.js';
 import { TICKET_PATTERN } from './line.js';
 import { lockout } from './lockout.js';
+import { blockedResponse, countWrongKey } from './keyguard.js';
 
 const KV_CLASS = 'class';
 const KV_SLICING = 'slicing'; // { phrase, until } while the teacher has slicing open
@@ -131,7 +132,10 @@ async function overLimit(limiter, request) {
 
 // The saved class setup, or the open defaults if none is saved (or it no longer passes the
 // checks, e.g. after a setting was removed from shared/settings.js).
-async function readClassConfig(env) {
+// When the READ itself fails (KV down): `strict` gives null, so a slice is refused instead of
+// running with every lock open and no print-time limit, and the teacher page does not load the
+// open defaults (saving those would wipe the real setup). The public page gets the defaults.
+async function readClassConfig(env, { strict = false } = {}) {
   try {
     const saved = await env.CLASS_KV?.get(KV_CLASS, 'json');
     if (saved) {
@@ -141,9 +145,12 @@ async function readClassConfig(env) {
     }
   } catch (e) {
     console.error(JSON.stringify({ message: 'class setup read failed', error: String(e) }));
+    if (strict) return null;
   }
   return DEFAULT_CLASS_CONFIG;
 }
+
+const CLASS_READ_FAILED = 'The class settings could not be read just now. Wait a minute and try again.';
 
 // The teacher's open slicing window, or null when closed (or run out).
 async function readSlicing(env) {
@@ -160,7 +167,9 @@ async function readSlicing(env) {
 // teacher endpoint at all: never fall open. The wrong-guess lockout (src/lockout.js, kind
 // 'teacher') is checked BEFORE the compare: a locked device is refused without comparing. It
 // counts per DEVICE (the page's x-client-id), never per address: a school shares one IP, and a
-// per-address lockout would let one student lock out the teacher or the class.
+// per-address lockout would let one student lock out the teacher or the class. A script can make
+// up device ids, so WRONG keys also count per address (src/keyguard.js, 20 a minute): only past
+// that is an address refused, and right keys are never counted.
 // null = the key is right; otherwise the answer to send.
 async function teacherRefusal(request, env) {
   // TEACHER_KEY_2: an optional second teacher (a student teacher); delete that secret to remove them.
@@ -168,6 +177,9 @@ async function teacherRefusal(request, env) {
   if (!keys.length) {
     console.error(JSON.stringify({ message: 'TEACHER_KEY is not set; teacher endpoint refused' }));
   } else {
+    // Too many wrong keys from one address only slows down WRONG keys (src/keyguard.js): every key is
+    // still compared, so the right key always works. A whole school shares one address, and a student
+    // must never be able to lock the teacher out (Dalton, 2026-09-28). The keys are long and random.
     const lock = await lockout(env, 'teacher', request);
     if (lock.locked) return lock.response(json);
     if (await anyKeyEquals(request.headers.get('x-teacher-key') ?? '', keys)) {
@@ -175,6 +187,8 @@ async function teacherRefusal(request, env) {
       return null;
     }
     await lock.wrong();
+    const nowBlocked = await countWrongKey(env, 'teacher', request); // only wrong keys count
+    if (nowBlocked) return blockedResponse(json, nowBlocked);
   }
   await new Promise((r) => setTimeout(r, TEACHER_REJECT_DELAY_MS));
   return json(401, { error: 'key', message: 'Wrong teacher key.' });
@@ -192,6 +206,8 @@ async function armKeyRefusal(request, env) {
     return null;
   }
   await lock.wrong();
+  const nowBlocked = await countWrongKey(env, 'arm', request); // only wrong passwords count
+  if (nowBlocked) return blockedResponse(json, nowBlocked);
   await new Promise((r) => setTimeout(r, TEACHER_REJECT_DELAY_MS));
   return json(403, { error: 'arm', message: 'That password is not right. Ask your teacher.' });
 }
@@ -256,7 +272,10 @@ async function handleTeacher(request, env, url, ctx) {
     }
   }
   if (url.pathname !== '/api/teacher/class') return json(404, { error: 'not_found', message: 'No such API.' });
-  if (request.method === 'GET') return json(200, await readClassConfig(env));
+  if (request.method === 'GET') {
+    const config = await readClassConfig(env, { strict: true });
+    return config ? json(200, config) : json(503, { error: 'storage', message: CLASS_READ_FAILED });
+  }
   if (request.method !== 'PUT') return json(405, { error: 'method', message: 'Use GET or PUT.' });
   const bytes = await request.arrayBuffer();
   if (bytes.byteLength > MAX_TEACHER_BYTES) return json(413, { error: 'size', message: 'That is too much to save.' });
@@ -381,7 +400,9 @@ async function handleSlice(request, env) {
   }
   const checked = validateSettings(settingsInput);
   if (!checked.ok) return refuse(400, 'Those print settings are not allowed. Press "Back to class settings" and try again.', { details: checked.errors });
-  const classConfig = await readClassConfig(env);
+  // The teacher's locks and print-time limit: if they cannot be read, do not slice without them.
+  const classConfig = await readClassConfig(env, { strict: true });
+  if (!classConfig) return refuse(503, CLASS_READ_FAILED);
   const locked = checkAgainstClass(checked.settings, classConfig);
   if (locked.length) {
     return refuse(400, `Your teacher has locked ${locked.join(', ')}. Reload the page to get the class settings.`, { locked });
@@ -462,6 +483,10 @@ async function sliceWithEngine(send, stlBytes, settings, { arm = null, fileName,
     const detail = await res.text().catch(() => '');
     console.error(JSON.stringify({ message: 'slicer refused', status: res.status, detail: detail.slice(0, 300) }));
     // container/server.py SLICE_BUDGET_S ran out.
+    // container/server.py: too many slices already waiting there (e.g. the line failed).
+    if (res.status === 503 && /slicer busy/.test(detail)) {
+      return refuse(503, 'The slicer is very busy right now. Wait a minute and try again.');
+    }
     if (/took too long/.test(detail)) {
       return refuse(502, 'This plate takes too long to slice. Try fewer models on the plate, Fast quality, or supports off if it does not need them.');
     }
