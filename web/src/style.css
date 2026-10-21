@@ -25,6 +25,11 @@ body {
   font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--ink); background: var(--bg);
 }
+/* Each part keeps its own row. School Chrome extensions put their own element at the top of <body>; without
+   these it took row 1, the title bar filled the middle of the screen and the plate got 0 px (2026-10-21). */
+body > .titlebar { grid-row: 1; }
+body > main { grid-row: 2; }
+body > .footer { grid-row: 3; }
 button, input, select { font: inherit; color: inherit; }
 a { color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
