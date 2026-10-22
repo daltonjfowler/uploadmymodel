@@ -610,3 +610,16 @@ test('a slicer with too many waiting ("slicer busy", 503) becomes a friendly try
     console.error = quiet;
   }
 });
+
+test('search engines may list the student page and /legal; teacher, API, test pages and errors stay noindex', async () => {
+  const e = { ...env(), ASSETS: { fetch: async (req) => new Response('page', { status: new URL(req.url).pathname === '/nope' ? 404 : 200, headers: { 'content-type': 'text/html' } }) } };
+  const robots = async (path) => (await worker.fetch(new Request(`https://uploadmymodel.com${path}`), e, {})).headers.get('x-robots-tag');
+  for (const path of ['/', '/legal', '/robots.txt', '/sitemap.xml']) assert.equal(await robots(path), null, path);
+  for (const path of ['/teacher/', '/usb-test/', '/api/slicing', '/api/health', '/nope', '/icon.svg']) assert.equal(await robots(path), 'noindex, nofollow', path);
+  const home = await worker.fetch(new Request('https://uploadmymodel.com/'), e, {});
+  assert.equal(home.headers.get('x-frame-options'), 'DENY');
+  assert.match(home.headers.get('content-security-policy'), /script-src 'self'/);
+  const www = await worker.fetch(new Request('https://www.uploadmymodel.com/'), e, {});
+  assert.equal(www.status, 301);
+  assert.equal(www.headers.get('x-robots-tag'), 'noindex, nofollow');
+});

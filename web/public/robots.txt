@@ -1,2 +1,8 @@
+# The student page and /legal may be listed; teacher, API and test pages may not.
 User-agent: *
-Disallow: /
+Allow: /
+Disallow: /teacher/
+Disallow: /api/
+Disallow: /usb-test/
+
+Sitemap: https://uploadmymodel.com/sitemap.xml

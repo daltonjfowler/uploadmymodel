@@ -51,17 +51,22 @@ const COMMON_HEADERS = [
   // serial=(self): the printer USB test page (and later "print from USB"); nothing else gets it.
   ['permissions-policy', 'serial=(self), usb=(), camera=(), microphone=(), geolocation=(), payment=()'],
   ['cross-origin-opener-policy', 'same-origin'],
-  ['x-robots-tag', 'noindex, nofollow'],
 ];
+
+// Search engines may list the student page and /legal (Dalton 2026-10-21). Everything else (teacher,
+// API, USB test, redirects, errors) keeps noindex.
+const INDEXABLE = new Set(['/', '/legal', '/robots.txt', '/sitemap.xml']);
+const NOINDEX = 'noindex, nofollow';
 
 function isLocal(host) {
   return host === 'localhost' || host.endsWith('.localhost') || host === '127.0.0.1' || host === '[::1]';
 }
 
 // Asset responses have immutable headers, so copy into a new Response first.
-function withSecurityHeaders(response) {
+function withSecurityHeaders(response, pathname = '') {
   const copy = new Response(response.body, response);
   for (const [name, value] of COMMON_HEADERS) copy.headers.set(name, value);
+  if (!(copy.status === 200 && INDEXABLE.has(pathname))) copy.headers.set('x-robots-tag', NOINDEX);
   const type = (copy.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
   if (type === 'text/html') copy.headers.set('content-security-policy', CONTENT_SECURITY_POLICY);
   return copy;
@@ -592,6 +597,6 @@ export default {
     }
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api/')) return withSecurityHeaders(await handleApi(request, env, url, ctx));
-    return withSecurityHeaders(await env.ASSETS.fetch(request));
+    return withSecurityHeaders(await env.ASSETS.fetch(request), url.pathname);
   },
 };
