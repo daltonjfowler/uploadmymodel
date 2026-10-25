@@ -8,8 +8,11 @@
 # CuraEngine is AGPLv3 and is used unmodified; its source is at
 # https://gitlab.com/lulzbot3d/cura-le/cura-engine-le . The resource files are LGPLv3.
 
+# Base images pinned by digest (the multi-arch index of each tag on 2026-10-25), so a rebuild can't
+# pick up a different base. To update: docker buildx imagetools inspect <tag>, and use Manifest.Digest.
+
 # ---- Stage 1: take CuraEngine and the resources out of the AppImage ---------------------------
-FROM debian:bookworm-slim AS appimage
+FROM debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8 AS appimage
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 ARG APPIMAGE_URL=https://software.lulzbot.com/Cura_LulzBot_Edition/Linux/4.13.2/Cura_LulzBot_Edition-4.13.2.AppImage
@@ -30,7 +33,8 @@ RUN curl -fsSL -o cura.AppImage "$APPIMAGE_URL" \
     && rm -rf squashfs-root cura.AppImage
 
 # ---- Stage 2: the slicer service ----------------------------------------------------------------
-FROM python:3.12-slim-bookworm
+# Python 3.12.15 on Debian 12 (bookworm).
+FROM python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
 COPY --from=appimage /out/bin /opt/curaengine
 COPY --from=appimage /out/resources /opt/cura/resources
 # OMP_NUM_THREADS=1: the container has 1 vCPU, but the engine sees the host's cores and starts a
