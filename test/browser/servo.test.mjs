@@ -98,6 +98,31 @@ check('front pocket: closed solid', m[0].open, 0);
 check('front pocket: material taken away', m[0].volume < 72000 - 5000, true);
 check('front pocket: still 30 mm tall', m[0].height, 30);
 
+// 1c. a horn pocket (Dalton, 2026-10-28), Snug fit, cross horn with 18 mm arms, screw hole through
+await page.keyboard.press('Control+z');
+await page.waitForTimeout(500);
+await page.evaluate(() => window.umm.viewer.select(window.umm.viewer.models[0]));
+await page.waitForTimeout(200);
+await page.click('#toolPanel button:has-text("Add a servo")');
+await page.waitForTimeout(400);
+await page.click('#toolPanel button:has-text("Horn (fix a part to it)")');
+await page.waitForTimeout(200);
+check('horn shapes offered', await page.$$eval('#toolPanel .seg[aria-label="Horn shape"] button', (b) => b.map((x) => x.textContent).join(',')), 'One arm,Two arms,Cross,Round');
+await page.click('#toolPanel .seg[aria-label="Horn shape"] button:has-text("Cross")');
+await page.waitForTimeout(200);
+await page.fill('#toolPanel input[aria-label="Horn arm length, number"]', '18');
+await page.press('#toolPanel input[aria-label="Horn arm length, number"]', 'Tab');
+await page.click('#toolPanel .seg[aria-label="Fit"] button:has-text("Snug")');
+await page.waitForTimeout(200);
+check('snug chosen', await page.getAttribute('#toolPanel .seg[aria-label="Fit"] button:has-text("Snug")', 'aria-pressed'), 'true');
+check('horn: thick enough', await page.isVisible('#toolPanel .advice.warn'), false);
+await page.screenshot({ path: OUT + 'servo-horn.png' });
+await page.click('#toolPanel button:has-text("Cut horn pocket")');
+await page.waitForTimeout(1500);
+m = await info();
+check('horn pocket: closed solid', m[0].open, 0);
+check('horn pocket: recess plus a hole through', m[0].volume < 72000 - 300 && m[0].volume > 72000 - 2500, true);
+
 // 2. a 4 mm plate: too thin for a pocket, so a mount
 await page.evaluate(() => { window.umm.viewer.selectAll(); window.umm.viewer.removeSelected(); });
 await page.setInputFiles('#fileInput', stl('servo-plate.stl', [60, 40, 4]));
@@ -113,7 +138,7 @@ await page.click('#toolPanel button:has-text("Add mount")');
 await page.waitForTimeout(1500);
 m = await info();
 check('mount: closed solid', m[0].open, 0);
-check('mount: block stands on the plate', m[0].height, 24.8);
+check('mount: block stands on the plate', m[0].height, 25.2); // 4 + 16.2 + 2.6 + 0.4 room + 2 floor
 
 // 3. Escape leaves servo mode
 await page.click('#toolPanel button:has-text("Add a servo")');

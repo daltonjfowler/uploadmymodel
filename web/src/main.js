@@ -896,7 +896,8 @@ async function startServo(point = null, normal = null) {
   if (cut) endCut();
   const spot = point && normal ? { at: viewer.toModelMm(m, point), normal: normal.clone().normalize() } : null;
   servo = {
-    model: m, tool, kind: servo?.kind ?? 'pocket', spin: servo?.spin ?? 0,
+    model: m, tool, kind: servo?.kind ?? 'pocket', spin: servo?.spin ?? 0, fit: servo?.fit ?? 'normal',
+    horn: servo?.horn ?? 'double', arm: servo?.arm ?? 16, through: servo?.through ?? true,
     side: spot ? 'spot' : 'top', spot, du: 0, dv: 0, at: null, normal: null,
   };
   if (!aimServo()) { // e.g. a ring: nothing straight down through its middle
@@ -918,8 +919,23 @@ function endServo() {
 /** The solids for the servo as it is set up now: { adds, cuts }. */
 function servoSolids() {
   const { at, normal, kind, spin } = servo;
-  return kind === 'mount' ? csg.servoMount(at, normal, spin) : { adds: [], cuts: csg.servoPocket(at, normal, spin) };
+  const clearance = csg.FITS[servo.fit];
+  const s = { ...csg.SERVO_9G, clearance };
+  if (kind === 'horn') {
+    // the middle hole just comes out of the far side (a hole 400 mm long would show past the bed)
+    const m = servo.model;
+    const depth = viewer.depthAt(m, at.clone().add(new Vector3(m.position.x, m.position.y, 0)), normal);
+    const throughDepth = Number.isFinite(depth) ? depth + 2 : 400;
+    return { adds: [], cuts: csg.hornPocket(at, normal, spin, { kind: servo.horn, armLength: servo.horn === 'round' ? null : servo.arm, through: servo.through, throughDepth, clearance }) };
+  }
+  return kind === 'mount' ? csg.servoMount(at, normal, spin, s) : { adds: [], cuts: csg.servoPocket(at, normal, spin, s) };
 }
+
+const SERVO_DONE = {
+  pocket: ['Cutting the servo pocket…', 'servo pocket', 'Servo pocket cut. A 9 g servo (SG90 or MG90S) pushes in; two small screws hold it.'],
+  mount: ['Adding the servo mount…', 'servo mount', 'Servo mount added. A 9 g servo (SG90 or MG90S) pushes in; two small screws hold it.'],
+  horn: ['Cutting the horn pocket…', 'horn pocket', 'Horn pocket cut. Press the horn in, flat side first; its small screws go in the pilot holes, and the middle hole lets the servo screw through.'],
+};
 
 function showServoGhost() {
   const { adds, cuts } = servoSolids();
@@ -929,7 +945,7 @@ function showServoGhost() {
 async function applyServo() {
   if (!servo) return;
   const { model, kind } = servo;
-  busy(kind === 'mount' ? 'Adding the servo mount…' : 'Cutting the servo pocket…');
+  busy(SERVO_DONE[kind][0]);
   await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
   let out;
   try {
@@ -941,7 +957,7 @@ async function applyServo() {
   } finally {
     busy(null);
   }
-  const made = viewer.replaceModel(model, out, kind === 'mount' ? 'servo mount' : 'servo pocket');
+  const made = viewer.replaceModel(model, out, SERVO_DONE[kind][1]);
   if (!made) {
     toast(`With the servo, the plate would have too much detail to slice (the most is ${fmt(LIMITS.maxTriangles)} triangles). Remove a model first.`, { kind: 'error', timeout: 10000 });
     return;
@@ -951,7 +967,7 @@ async function applyServo() {
   renderTools();
   const entry = viewer.undoStack.at(-1);
   checkHealth(made, { quiet: true });
-  toast(`${kind === 'mount' ? 'Servo mount added' : 'Servo pocket cut'}. A 9 g servo (SG90 or MG90S) pushes in; two small screws hold it.`, {
+  toast(SERVO_DONE[kind][2], {
     timeout: 8000,
     action: () => {
       if (viewer.undoStack.at(-1) === entry) undo();
@@ -967,7 +983,7 @@ function renderServoPanel(p, m) {
   title.innerHTML = `<strong>Servo (9 g)</strong><span class="tp-model">${esc(m.name)}</span>`;
   p.append(title);
   const kinds = el('div', { class: 'seg servokind', role: 'group', 'aria-label': 'Servo kind' });
-  for (const [k, label] of [['pocket', 'Pocket (sunk in)'], ['mount', 'Mount (block on top)']]) {
+  for (const [k, label] of [['pocket', 'Pocket (sunk in)'], ['mount', 'Mount (block on top)'], ['horn', 'Horn (fix a part to it)']]) {
     const b = button(label, () => {
       servo.kind = k;
       renderTools();
@@ -976,6 +992,58 @@ function renderServoPanel(p, m) {
     kinds.append(b);
   }
   p.append(kinds);
+
+  // which horn, and how long its arms are (brands differ: measure yours)
+  if (servo.kind === 'horn') {
+    const horns = el('div', { class: 'seg', role: 'group', 'aria-label': 'Horn shape' });
+    for (const [k, label] of [['single', 'One arm'], ['double', 'Two arms'], ['cross', 'Cross'], ['round', 'Round']]) {
+      const b = button(label, () => {
+        servo.horn = k;
+        renderTools();
+      }, servo.horn === k ? 'on' : '');
+      b.setAttribute('aria-pressed', String(servo.horn === k));
+      horns.append(b);
+    }
+    p.append(horns);
+    if (servo.horn !== 'round') {
+      const line = el('div', { class: 'cutctl' });
+      const range = el('input', { type: 'range', min: 8, max: 25, step: 0.5, 'aria-label': 'Horn arm length' });
+      const num = el('input', { type: 'number', min: 8, max: 25, step: 0.5, inputmode: 'decimal', 'aria-label': 'Horn arm length, number' });
+      range.value = num.value = String(servo.arm);
+      const put = (raw) => {
+        const v = Math.round(Math.min(25, Math.max(8, Number(raw))) * 2) / 2;
+        if (Number.isFinite(v)) servo.arm = v;
+        range.value = num.value = String(servo.arm);
+        showServoGhost();
+      };
+      range.addEventListener('input', () => put(range.value));
+      num.addEventListener('change', () => put(num.value));
+      line.append(el('span', { class: 'sub-label' }, 'Arm length (middle of the horn to the tip)'), range, num, el('span', { class: 'unit' }, 'mm'));
+      p.append(line);
+    }
+    const through = el('label', { class: 'check' });
+    const box = el('input', { type: 'checkbox' });
+    box.checked = servo.through;
+    box.addEventListener('change', () => {
+      servo.through = box.checked;
+      showServoGhost();
+    });
+    through.append(box, document.createTextNode(' Hole through the middle, for the servo screw and a screwdriver'));
+    p.append(through);
+  }
+
+  p.append(el('span', { class: 'sub-label' }, 'Fit'));
+  const fits = el('div', { class: 'seg', role: 'group', 'aria-label': 'Fit' });
+  for (const [k, label] of [['snug', 'Snug'], ['normal', 'Normal'], ['loose', 'Loose']]) {
+    const b = button(label, () => {
+      servo.fit = k;
+      renderTools();
+    }, servo.fit === k ? 'on' : '');
+    b.setAttribute('aria-pressed', String(servo.fit === k));
+    b.title = `${csg.FITS[k]} mm of room on every side`;
+    fits.append(b);
+  }
+  p.append(fits);
 
   p.append(el('span', { class: 'sub-label' }, 'Side of the model'));
   const sides = el('div', { class: 'servosides', role: 'group', 'aria-label': 'Side of the model' });
@@ -998,17 +1066,23 @@ function renderServoPanel(p, m) {
 
   const depthNote = el('p');
   const showDepth = () => {
-    depthNote.hidden = servo.kind !== 'pocket';
+    depthNote.hidden = servo.kind === 'mount';
     if (depthNote.hidden) return;
+    const horn = servo.kind === 'horn';
     const world = servo.at.clone().add(new Vector3(m.position.x, m.position.y, 0));
     const depth = viewer.depthAt(m, world, servo.normal);
-    const need = csg.servoDepth() + 1;
+    const clearance = csg.FITS[servo.fit];
+    const need = horn ? csg.hornDepth(clearance) + 2 : csg.servoDepth({ ...csg.SERVO_9G, clearance }) + 1;
     const thick = Number.isFinite(depth) ? `${fmt(depth, 1)} mm` : 'very';
     const thin = depth < need;
     depthNote.className = thin ? 'advice warn' : 'note';
-    depthNote.textContent = thin
-      ? `Too thin here (${thick} thick, a pocket needs ${fmt(need, 0)} mm): it would go right through. Pick a thicker spot, or use Mount.`
-      : `The model is ${thick} thick here; the pocket goes ${fmt(need - 1, 0)} mm in.`;
+    depthNote.textContent = horn
+      ? (thin
+        ? `Too thin here (${thick} thick, a horn pocket needs ${fmt(need, 0)} mm). Pick a thicker spot.`
+        : `The model is ${thick} thick here; the horn sits ${fmt(csg.hornDepth(clearance), 1)} mm in.`)
+      : (thin
+        ? `Too thin here (${thick} thick, a pocket needs ${fmt(need, 0)} mm): it would go right through. Pick a thicker spot, or use Mount.`
+        : `The model is ${thick} thick here; the pocket goes ${fmt(need - 1, 0)} mm in.`);
   };
   // slide along the face: re-aimed on every move, so it follows a curved or stepped side
   const box = viewer.worldBox(m);
@@ -1051,7 +1125,7 @@ function renderServoPanel(p, m) {
   showDepth();
   p.append(depthNote);
   const go = el('div', { class: 'btn-row' });
-  go.append(button(servo.kind === 'mount' ? '⚙ Add mount' : '⚙ Cut pocket', applyServo, 'primary'), button('Cancel', endServo));
+  go.append(button({ pocket: '⚙ Cut pocket', mount: '⚙ Add mount', horn: '⚙ Cut horn pocket' }[servo.kind], applyServo, 'primary'), button('Cancel', endServo));
   p.append(go);
   p.append(el('p', { class: 'note' }, 'For the 9 g micro servo in Arduino kits (SG90 or MG90S). The see-through shape shows what is cut away. It pushes in by hand, two small screws hold it, and a slot lets the wire out. Pick a side (a flat cut face works well), slide it into place, or right-click the model to put it right where you click.'));
   showServoGhost();

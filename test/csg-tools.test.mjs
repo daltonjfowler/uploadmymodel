@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Vector3 } from 'three';
-import { combine, connectorSpots, dowelPin, hole, peg, servoDepth, servoMount, servoPocket, SERVO_9G } from '../web/src/csg-tools.js';
+import { combine, connectorSpots, dowelPin, FITS, hole, HORN_9G, hornPocket, peg, servoDepth, servoMount, servoPocket, SERVO_9G } from '../web/src/csg-tools.js';
 import { meshHealth } from '../web/src/mesh-health.js';
 
 function box(x, y, z, sx, sy = sx, sz = sx) {
@@ -108,4 +108,34 @@ test('a servo mount on a thin plate: a block with the pocket in its top, all one
   const pocket = (s.body[0] + 2 * c) * (s.body[1] + 2 * c) * (s.bodyDepth + s.tabDepth);
   const added = volume(out) - 60 * 40 * 4;
   assert.ok(added < block - pocket && added > block - pocket - 1200, `added ${added.toFixed(0)} mm³`);
+});
+
+test('servo fits: a looser fit takes more away, and the tabs always seat (pocket deeper than the servo)', () => {
+  const block = box(0, 0, 0, 50, 30, 30);
+  const taken = (fit) => 45000 - volume(combine(block, { cuts: servoPocket(new Vector3(25, 15, 30), UP, 0, { ...SERVO_9G, clearance: FITS[fit] }) }));
+  const [snug, normal, loose] = ['snug', 'normal', 'loose'].map(taken);
+  assert.ok(snug < normal && normal < loose, `${snug.toFixed(0)} < ${normal.toFixed(0)} < ${loose.toFixed(0)}`);
+  assert.ok(servoDepth() > SERVO_9G.bodyDepth + SERVO_9G.tabDepth, 'room under the servo');
+  // a clone SG90 at 23.0 x 12.5 mm still fits Normal with 0.1 mm a side to spare after a 0.2 mm small print
+  const c = FITS.normal;
+  assert.ok(SERVO_9G.body[0] + 2 * c - 0.2 - 23.0 >= 0.2 && SERVO_9G.body[1] + 2 * c - 0.2 - 12.5 >= 0.2);
+});
+
+test('horn pockets: every kind leaves a closed solid with a recess the horn sits in', () => {
+  const block = box(0, 0, 0, 60, 60, 12);
+  for (const kind of ['single', 'double', 'cross', 'round']) {
+    const out = combine(block, { cuts: hornPocket(new Vector3(30, 30, 12), UP, 0, { kind, through: false }) });
+    closed(out, kind);
+    const taken = 60 * 60 * 12 - volume(out);
+    assert.ok(taken > 50 && taken < 1500, `${kind}: took ${taken.toFixed(0)} mm³`);
+  }
+  // the screw hole goes right through: the block is open from top to bottom in the middle
+  const through = combine(block, { cuts: hornPocket(new Vector3(30, 30, 12), UP, 0, { kind: 'double' }) });
+  closed(through, 'with the screw hole through');
+  const r = (HORN_9G.screwHole + 2 * FITS.normal) / 2;
+  assert.ok(60 * 60 * 12 - volume(through) > Math.PI * r * r * 12 * 0.95, 'hole all the way through');
+  // a longer arm takes more
+  const long = combine(block, { cuts: hornPocket(new Vector3(30, 30, 12), UP, 0, { kind: 'single', armLength: 22, through: false }) });
+  const short = combine(block, { cuts: hornPocket(new Vector3(30, 30, 12), UP, 0, { kind: 'single', armLength: 12, through: false }) });
+  assert.ok(volume(long) < volume(short), 'arm length changes the pocket');
 });

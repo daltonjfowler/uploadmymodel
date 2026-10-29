@@ -285,7 +285,7 @@ export function connectorSpots(loops, need, { max = 2 } = {}) {
 
 /**
  * Sizes in mm, from the TowerPro SG90 data sheet; MG90S is the same within 0.3 mm. Clearance is
- * added on every side so the servo pushes in by hand.
+ * added on every side so the servo pushes in by hand (see FITS for the student's choice).
  */
 export const SERVO_9G = {
   body: [22.8, 12.2], // length x width
@@ -296,8 +296,16 @@ export const SERVO_9G = {
   screwHole: 1.8, // pilot hole for the self-tapping screws
   screwDepth: 8,
   cable: [4.2, 2.4], // a slot down one end wall, so the wire comes out of the top
-  clearance: 0.3,
+  clearance: 0.4,
 };
+
+/**
+ * Gap added on every side of a servo or horn cut, mm (Dalton, 2026-10-28: "ensure tolerances are
+ * appropriate"). The class printer has a 0.50 mm nozzle, and holes come out about 0.2 mm small, so
+ * Normal leaves about 0.2 mm of real play per side; Snug is a firm push; Loose is for a stiff servo or
+ * a rough print. Clone SG90s run up to 23.0 x 12.5 mm: Normal still takes those.
+ */
+export const FITS = { snug: 0.25, normal: 0.4, loose: 0.55 };
 
 /**
  * The solid to cut away for a 9 g servo, its opening centred on `at`, going into the model along
@@ -316,7 +324,7 @@ export function servoPocket(at, normal, spinDeg = 0, s = SERVO_9G) {
   };
   const [bl, bw] = [s.body[0] + 2 * c, s.body[1] + 2 * c];
   const [tl, tw] = [s.tabs[0] + 2 * c, s.tabs[1] + 2 * c];
-  const bodyDepth = s.bodyDepth + s.tabDepth;
+  const bodyDepth = s.bodyDepth + s.tabDepth + c; // room at the bottom too, so the tabs always seat flush
   parts.push(box(bl, bw, bodyDepth + lead, 0, (lead - bodyDepth) / 2, 0));
   parts.push(box(tl, tw, s.tabDepth + lead, 0, (lead - s.tabDepth) / 2, 0));
   for (const sx of [-1, 1]) {
@@ -334,7 +342,7 @@ export function servoPocket(at, normal, spinDeg = 0, s = SERVO_9G) {
 
 /** How deep a servo pocket goes into the model, mm (body + tabs, or the screw holes if deeper). */
 export function servoDepth(s = SERVO_9G) {
-  return Math.max(s.bodyDepth + s.tabDepth, s.tabDepth + s.screwDepth);
+  return Math.max(s.bodyDepth + s.tabDepth + s.clearance, s.tabDepth + s.screwDepth);
 }
 
 /**
@@ -355,6 +363,89 @@ export function servoMount(at, normal, spinDeg = 0, s = SERVO_9G, { wall = 2, fl
     .multiply(new THREE.Matrix4().makeRotationY((spinDeg * Math.PI) / 180));
   const top = at.clone().addScaledVector(n, height);
   return { adds: [solid(g, turn)], cuts: servoPocket(top, n, spinDeg, s), height };
+}
+
+// ---- servo horns ----------------------------------------------------------------------------------
+// Dalton, 2026-10-28: a pocket for the horn (the plastic arm that goes on the servo's gear), so a
+// printed part fixes onto the servo. Typical SG90 / MG90S kit horns; brands differ by a millimetre or
+// two, so the arm length is the student's to change and a test print is worth it.
+
+export const HORN_9G = {
+  hub: 7.2, // round middle of the horn, across
+  armRoot: 5.6, // arm width next to the hub
+  armTip: 4.0, // arm width at its rounded end
+  arm: { single: [16], double: [16, 16], cross: [16, 16, 10, 10] }, // middle to tip, per arm
+  round: 20.5, // the round disc horn, across
+  thick: 1.8, // the flat plate that sits in the pocket
+  screwHole: 5.0, // through the part, middle: room for the horn screw's head and a screwdriver
+  pilot: 1.5, // at each arm's outer hole, for the small screws that come with the horn
+  pilotDepth: 6,
+  pilotIn: 2.0, // outer hole, this far in from the arm's tip
+};
+
+/** A flat outline (x, z points, counter-clockwise seen from +y) pulled from y0 up to y1. */
+function slab(points, y0, y1) {
+  const shape = new THREE.Shape(points.map(([x, z]) => new THREE.Vector2(x, -z)));
+  const g = new THREE.ExtrudeGeometry(shape, { depth: y1 - y0, bevelEnabled: false, curveSegments: 12 });
+  g.rotateX(-Math.PI / 2); // extruded along +z, which becomes +y; the shape's y becomes -z
+  g.translate(0, y0, 0);
+  return g;
+}
+
+/**
+ * The solids to cut away for a servo horn, centred on `at`, going in along -normal, turned `spinDeg`.
+ * `kind`: single | double | cross | round. `armLength` overrides the longest arm (mm, middle to tip);
+ * `through` makes the middle screw hole `throughDepth` mm long (the model's thickness there, so it comes
+ * out the far side, for a screwdriver). Each solid is cut away.
+ */
+export function hornPocket(at, normal, spinDeg = 0, { kind = 'double', armLength = null, through = true, throughDepth = 400, clearance = FITS.normal } = {}, h = HORN_9G) {
+  const c = clearance;
+  const n = normal.clone().normalize();
+  const lead = 0.6;
+  const depth = h.thick + c; // a little deeper than the plate, so it sits flush or just under
+  const parts = [];
+  const cyl = (d, y0, y1, x = 0, z = 0) => {
+    const g = revolve([[0, y0], [d / 2, y0], [d / 2, y1], [0, y1]], 32);
+    g.translate(x, 0, z);
+    return g;
+  };
+  if (kind === 'round') parts.push(cyl(h.round + 2 * c, -depth, lead));
+  else {
+    parts.push(cyl(h.hub + 2 * c, -depth, lead));
+    const arms = h.arm[kind] ?? h.arm.double;
+    const scale = armLength ? armLength / Math.max(...arms) : 1;
+    arms.forEach((len0, i) => {
+      const len = len0 * scale;
+      // arms in the order long, long, short, short: long ones opposite, short ones across them
+      const a = [0, Math.PI, Math.PI / 2, -Math.PI / 2][i];
+      const r0 = h.armRoot / 2 + c, r1 = h.armTip / 2 + c;
+      const tip = len - h.armTip / 2; // centre of the rounded end
+      const pts = [[0, -r0], [tip, -r1]];
+      for (let k = 1; k < 12; k++) {
+        const t = -Math.PI / 2 + (k * Math.PI) / 12;
+        pts.push([tip + r1 * Math.cos(t), r1 * Math.sin(t)]);
+      }
+      pts.push([tip, r1], [0, r0]);
+      const g = slab(pts, -depth, lead);
+      g.rotateY(a);
+      parts.push(g);
+      // pilot for the small screw through the arm's outer hole
+      const px = (len - h.pilotIn) * Math.cos(a), pz = -(len - h.pilotIn) * Math.sin(a);
+      parts.push(cyl(h.pilot, -depth - h.pilotDepth, lead, px, pz));
+    });
+  }
+  // the middle: the horn's own screw goes in from this side, so a hole for its head and a screwdriver
+  parts.push(cyl(h.screwHole + 2 * c, through ? -Math.max(throughDepth, depth + 6) : -depth - 6, lead));
+  const turn = new THREE.Matrix4()
+    .makeTranslation(at.x, at.y, at.z)
+    .multiply(turnFromY(n))
+    .multiply(new THREE.Matrix4().makeRotationY((spinDeg * Math.PI) / 180));
+  return parts.map((g) => solid(g, turn));
+}
+
+/** How deep a horn pocket goes before the middle hole: the plate, plus the arm pilots. */
+export function hornDepth(clearance = FITS.normal, h = HORN_9G) {
+  return h.thick + clearance;
 }
 
 // ---- connectors on a plane cut ------------------------------------------------------------------
