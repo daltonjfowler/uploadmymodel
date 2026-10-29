@@ -810,7 +810,7 @@ function renderCutPanel(p, m) {
     p.append(row);
   });
   p.append(button('＋ Add a plane', () => addCutPlane(), 'wide'));
-  const go = el('div', { class: 'btn-row' });
+  const go = el('div', { class: 'btn-row stick' }); // stays in sight however long the panel gets
   go.append(button('✂ Cut', applyCut, 'primary'), button('Cancel', endCut));
   p.append(go);
   p.append(el('p', { class: 'note' }, 'X cuts left from right, Y front from back, Z is a flat cut at a height above the bed. Every piece gets its cut face filled, so it prints solid; glue them after. Right-click the model to add a plane right where you click.'));
@@ -1048,8 +1048,29 @@ const SERVO_DONE = {
 
 function showServoGhost() {
   const { adds, cuts } = servoSolids();
-  viewer.setGhost(servo.model, [...adds, ...cuts]);
+  const m = servo.model;
+  // the spin ring: round the servo (or horn), on the face
+  const reach = servo.kind === 'horn' ? (servo.horn === 'round' ? 10.5 : servo.arm) : 17;
+  const center = servo.at.clone().add(new Vector3(m.position.x, m.position.y, 0));
+  viewer.setGhost(m, [...adds, ...cuts], { center, normal: servo.normal, radius: reach + 6 });
 }
+
+// Grabbing the see-through servo and dragging it (Tinkercad style): it goes where the pointer is,
+// on whichever face; the spin ring turns it. Checks (thickness, edges) run when it is let go.
+viewer.addEventListener('servomove', (e) => {
+  if (!servo) return;
+  const { point, normal } = e.detail;
+  Object.assign(servo, { side: 'spot', spot: { at: viewer.toModelMm(servo.model, point), normal: normal.clone().normalize() }, du: 0, dv: 0 });
+  if (aimServo()) showServoGhost();
+});
+viewer.addEventListener('servospin', (e) => {
+  if (!servo) return;
+  servo.spin = (((servo.spin + e.detail.delta) % 360) + 360) % 360;
+  showServoGhost();
+});
+viewer.addEventListener('servodone', () => {
+  if (servo) renderTools();
+});
 
 async function applyServo() {
   if (!servo) return;
@@ -1259,10 +1280,11 @@ function renderServoPanel(p, m) {
   }
   showDepth();
   p.append(depthNote, edgeNote);
-  const go = el('div', { class: 'btn-row' });
+  const go = el('div', { class: 'btn-row stick' }); // stays in sight however long the panel gets
   go.append(button({ pocket: '⚙ Cut pocket', mount: '⚙ Add mount', horn: '⚙ Cut horn pocket' }[servo.kind], applyServo, 'primary'), button('Cancel', endServo));
   p.append(go);
-  p.append(el('p', { class: 'note' }, 'For the 9 g micro servo in Arduino kits (SG90 or MG90S). The see-through shape shows what is cut away. It pushes in by hand, two small screws hold it, and a slot lets the wire out. Pick a side (a flat cut face works well), slide it into place, or right-click the model to put it right where you click.'));
+  p.append(el('p', { class: 'note' }, 'For the 9 g micro servo in Arduino kits (SG90 or MG90S). The see-through shape shows what is cut away. It pushes in by hand, two small screws hold it, and a slot lets the wire out.'));
+  p.append(el('p', { class: 'note tip' }, 'Grab the see-through servo and drag it onto any face. Drag the orange ring to turn it. Or pick a side and slide it here.'));
   showServoGhost();
 }
 

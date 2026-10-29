@@ -57,6 +57,68 @@ await page.waitForTimeout(800);
 check('servo panel', await page.textContent('#toolPanel .tp-title strong'), 'Servo (9 g)');
 check('see-through servo shown', await page.evaluate(() => Boolean(window.umm.viewer.ghost)), true);
 check('thick enough here', await page.isVisible('#toolPanel .advice.warn'), false);
+
+// Tinkercad style (Dalton, 2026-10-28): drag the see-through servo, turn it with its ring
+/** Bed point -> screen point. */
+const screen = (x, y, z) => page.evaluate(([px, py, pz]) => {
+  const v = window.umm.viewer;
+  const p = v.camera.position.clone().set(px, py, pz).project(v.camera);
+  const r = v.canvas.getBoundingClientRect();
+  return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height };
+}, [x, y, z]);
+const drag = async (from, to, steps = 10) => {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  for (let k = 1; k <= steps; k++) await page.mouse.move(from.x + ((to.x - from.x) * k) / steps, from.y + ((to.y - from.y) * k) / steps);
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+};
+const where = () => page.evaluate(() => {
+  const s = window.umm.servoState();
+  return { x: s.at.x, y: s.at.y, z: s.at.z, n: s.normal.toArray().map((v) => Math.round(v * 100) / 100), spin: s.spin };
+});
+const mp = await page.evaluate(() => window.umm.viewer.models[0].position.toArray());
+check('servo ring shown', await page.evaluate(() => window.umm.viewer.servoRing.group.visible), true);
+// a long panel on a short screen: the button still in sight without scrolling (page.click would scroll)
+const inSight = (label) => page.evaluate((t) => {
+  const panel = document.getElementById('toolPanel').getBoundingClientRect();
+  const b = [...document.querySelectorAll('#toolPanel button')].find((x) => x.textContent.includes(t)).getBoundingClientRect();
+  return b.top >= panel.top && b.bottom <= panel.bottom + 1;
+}, label);
+check('Cut pocket in sight without scrolling', await inSight('Cut pocket'), true);
+await drag(await screen(mp[0], mp[1], 30), await screen(mp[0] + 12, mp[1] + 6, 30));
+let w = await where();
+check('dragged along the top', Math.abs(w.x - 12) < 2 && Math.abs(w.y - 6) < 2 && w.n.join() === '0,0,1', true);
+await page.screenshot({ path: OUT + 'servo-drag-top.png' });
+await drag(await screen(mp[0] + 12, mp[1] + 6, 30), await screen(mp[0], mp[1] - 20, 14));
+w = await where();
+check('dragged over the edge onto the front', w.n.join() === '0,-1,0' && Math.abs(w.z - 14) < 2.5, true);
+check('panel knows: where I clicked', await page.getAttribute('#toolPanel .servosides button:has-text("Where I clicked")', 'aria-pressed'), 'true');
+await page.screenshot({ path: OUT + 'servo-drag-front.png' });
+// the ring round it: from the front it faces the camera, so go a quarter of the way round
+const ringAt = (deg) => page.evaluate((a) => {
+  const v = window.umm.viewer;
+  const g = v.servoRing.group;
+  g.updateMatrixWorld();
+  const p = g.localToWorld(v.camera.position.clone().set(Math.cos(a * Math.PI / 180), Math.sin(a * Math.PI / 180), 0)).project(v.camera);
+  const r = v.canvas.getBoundingClientRect();
+  return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height };
+}, deg);
+const spin0 = w.spin;
+await page.mouse.move(...Object.values(await ringAt(0)));
+await page.mouse.down();
+for (let k = 1; k <= 9; k++) await page.mouse.move(...Object.values(await ringAt(k * 10)));
+await page.mouse.up();
+await page.waitForTimeout(300);
+w = await where();
+const turned = ((w.spin - spin0) % 360 + 360) % 360;
+check('the ring turned it a quarter', turned === 90 || turned === 270, true);
+check('panel spin follows', Number(await page.inputValue('#toolPanel input[aria-label="Servo spin, number"]')), w.spin);
+await page.screenshot({ path: OUT + 'servo-drag-spin.png' });
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
+await page.click('.tool[data-tool="servo"]');
+await page.waitForTimeout(400);
 await page.fill('#toolPanel input[aria-label="Servo spin, number"]', '90');
 await page.press('#toolPanel input[aria-label="Servo spin, number"]', 'Tab');
 await page.screenshot({ path: OUT + 'servo-pocket.png' });

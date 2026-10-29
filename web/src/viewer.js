@@ -1018,7 +1018,8 @@ export class Viewer extends EventTarget {
   }
 
   /** See-through solids over `model` (model mm triangle soups; null hides them). */
-  setGhost(model, soups = []) {
+  setGhost(model, soups = [], handle = null) {
+    this.setServoHandle(model && soups.length ? { model, ...handle } : null);
     if (this.ghost) {
       this.scene.remove(this.ghost);
       this.ghost.geometry.dispose();
@@ -1037,10 +1038,123 @@ export class Viewer extends EventTarget {
       this.ghost = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x3e63dd, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));
       this.ghost.position.set(model.position.x, model.position.y, 0);
       this.ghost.renderOrder = 11;
-      this.ghost.raycast = () => {};
       this.scene.add(this.ghost);
     }
     this.requestRender();
+  }
+
+  // ---- Servo handles (Dalton, 2026-10-28: "like Tinkercad", the same feel as the plane rings) -------
+  // Grab the see-through servo and drag it: it sticks to whichever face of its model is under the
+  // pointer. A ring round it turns it, in 5° steps. main.js owns the servo; this only reports moves.
+
+  /** { model, center (bed mm), normal, radius } puts the spin ring there; null hides it. */
+  setServoHandle(h) {
+    if (!this.servoRing) {
+      const group = new THREE.Group();
+      const vis = new THREE.Mesh(new THREE.TorusGeometry(1, 0.035, 8, 128), new THREE.MeshBasicMaterial({ color: 0xf59e0b, depthTest: false, transparent: true, opacity: 0.95 }));
+      vis.renderOrder = 12;
+      const hit = new THREE.Mesh(new THREE.TorusGeometry(1, 0.1, 6, 64), new THREE.MeshBasicMaterial({ visible: false }));
+      group.add(vis, hit);
+      group.visible = false;
+      this.servoRing = { group, vis, hit };
+      this.scene.add(group);
+    }
+    this.servoHandle = h?.center ? h : null;
+    const r = this.servoRing;
+    r.group.visible = !!this.servoHandle && this.stage !== 'preview';
+    if (this.servoHandle) {
+      const n = h.normal.clone().normalize();
+      r.group.position.copy(h.center).addScaledVector(n, 0.8); // just off the face, so it never hides in it
+      r.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+      r.group.scale.setScalar(h.radius);
+    }
+    this.requestRender();
+  }
+
+  /** 'spin' over the ring, 'move' over the see-through servo, else null. */
+  hitServo(e) {
+    if (!this.servoHandle || !this.ghost) return null;
+    this.setRay(e);
+    if (this.raycaster.intersectObject(this.servoRing.hit, false).length) return 'spin';
+    if (this.raycaster.intersectObject(this.ghost, false).length) return 'move';
+    return null;
+  }
+
+  startServoDrag(e, kind) {
+    const h = this.servoHandle;
+    const n = h.normal.clone().normalize();
+    const d = { kind, model: h.model, n, center: this.servoRing.group.position.clone(), total: 0, snapped: 0 };
+    if (kind === 'spin') {
+      d.u = Math.abs(n.z) < 0.9 ? new THREE.Vector3(0, 0, 1).cross(n).normalize() : new THREE.Vector3(1, 0, 0);
+      d.w = n.clone().cross(d.u);
+      d.plane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, d.center);
+      const look = d.center.clone().sub(this.camera.position).normalize();
+      if (Math.abs(look.dot(n)) < 0.3) d.screenY = e.clientY; // seen edge-on: drag up or down
+      else {
+        this.servoDrag = d;
+        const a = this.planeRingAngleFor(e, d);
+        if (a === null) {
+          this.servoDrag = null;
+          return false;
+        }
+        d.last = a;
+      }
+    }
+    this.servoDrag = d;
+    this.canvas.style.cursor = kind === 'spin' ? 'alias' : 'move';
+    return true;
+  }
+
+  planeRingAngleFor(e, d) {
+    this.setRay(e);
+    const p = this.raycaster.ray.intersectPlane(d.plane, new THREE.Vector3());
+    if (!p) return null;
+    const v = p.sub(d.center);
+    return Math.atan2(v.dot(d.w), v.dot(d.u));
+  }
+
+  moveServoDrag(e) {
+    const d = this.servoDrag;
+    if (d.kind === 'move') {
+      // the face under the pointer, on this servo's model only
+      this.setRay(e);
+      const side = d.model.material.side;
+      d.model.material.side = THREE.FrontSide;
+      const hit = this.raycaster.intersectObject(d.model.mesh, false)[0];
+      d.model.material.side = side;
+      if (hit) {
+        d.moved = true;
+        this.emit('servomove', { point: hit.point, normal: this.worldNormal(d.model, hit.face.normal) });
+      }
+      return;
+    }
+    if (d.screenY !== undefined) d.total = THREE.MathUtils.degToRad((d.screenY - e.clientY) / 2);
+    else {
+      const a = this.planeRingAngleFor(e, d);
+      if (a === null) return;
+      let delta = a - d.last;
+      if (delta > Math.PI) delta -= 2 * Math.PI;
+      if (delta < -Math.PI) delta += 2 * Math.PI;
+      d.last = a;
+      d.total += delta;
+    }
+    const deg = Math.round(THREE.MathUtils.radToDeg(d.total) / 5) * 5;
+    if (deg !== d.snapped) {
+      this.emit('servospin', { delta: deg - d.snapped });
+      d.snapped = deg;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    this.angleLabel.textContent = `${deg > 0 ? '+' : ''}${deg}°`;
+    this.angleLabel.style.left = `${e.clientX - rect.left + 16}px`;
+    this.angleLabel.style.top = `${e.clientY - rect.top - 10}px`;
+    this.angleLabel.hidden = false;
+  }
+
+  endServoDrag() {
+    this.servoDrag = null;
+    this.angleLabel.hidden = true;
+    this.canvas.style.cursor = '';
+    this.emit('servodone'); // the panel checks the new spot (thickness, edges)
   }
 
   /**
@@ -1579,7 +1693,7 @@ export class Viewer extends EventTarget {
 
   /** True while a model or a rotate ring is being dragged: plate keys must wait. */
   get busy() {
-    return !!(this.drag || this.ringDrag || this.planeDrag);
+    return !!(this.drag || this.ringDrag || this.planeDrag || this.servoDrag);
   }
 
   onPointerDown(e) {
@@ -1594,6 +1708,13 @@ export class Viewer extends EventTarget {
     if (this.stage === 'preview') return; // the camera still works; models cannot be touched
     if (e.button !== 0 || e.shiftKey) return; // right-drag and Shift + drag pan the camera
     if (!this.layFlatPicking && !(e.ctrlKey || e.metaKey)) {
+      const grab = this.hitServo(e);
+      if (grab && this.startServoDrag(e, grab)) {
+        e.stopImmediatePropagation();
+        this.down = null;
+        this.canvas.setPointerCapture(e.pointerId);
+        return;
+      }
       const tilt = this.hitPlaneRing(e);
       if (tilt && this.startPlaneRingDrag(e, tilt)) {
         e.stopImmediatePropagation();
@@ -1648,6 +1769,10 @@ export class Viewer extends EventTarget {
   }
 
   onPointerMove(e) {
+    if (this.servoDrag) {
+      this.moveServoDrag(e);
+      return;
+    }
     if (this.planeDrag) {
       this.movePlaneRingDrag(e);
       return;
@@ -1680,11 +1805,17 @@ export class Viewer extends EventTarget {
     const now = performance.now();
     if (now - (this.lastHover ?? 0) < 80) return;
     this.lastHover = now;
-    const ring = this.hitPlaneRing(e) || this.hitRing(e);
-    this.canvas.style.cursor = ring ? 'alias' : this.pick(e, { hover: true }) ? 'grab' : '';
+    const sv = this.hitServo(e);
+    const ring = sv === 'spin' || this.hitPlaneRing(e) || this.hitRing(e);
+    this.canvas.style.cursor = sv === 'move' ? 'move' : ring ? 'alias' : this.pick(e, { hover: true }) ? 'grab' : '';
   }
 
   onPointerUp(e) {
+    if (this.servoDrag) {
+      if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
+      this.endServoDrag();
+      return;
+    }
     if (this.planeDrag) {
       if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
       this.endPlaneRingDrag();
