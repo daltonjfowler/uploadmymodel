@@ -844,6 +844,127 @@ export class Viewer extends EventTarget {
     return { made: this.splitModel(model, parts), open, missed };
   }
 
+  // ---- Servo pockets and mounts (csg-tools.js, main.js) ---------------------------------------
+  // CSG works in "model mm": the model's own corners times its scale, origin at model.position. Turns
+  // are baked into the corners and the model sits at z = 0, so model mm are bed mm minus the position.
+
+  /** The model's corners in model mm (a copy). */
+  modelMm(model) {
+    const p = model.geometry.attributes.position.array, s = model.mesh.scale;
+    const out = new Float32Array(p.length);
+    for (let i = 0; i < p.length; i += 3) {
+      out[i] = p[i] * s.x;
+      out[i + 1] = p[i + 1] * s.y;
+      out[i + 2] = p[i + 2] * s.z;
+    }
+    return out;
+  }
+
+  /** Bed mm -> model mm. */
+  toModelMm(model, point) {
+    return point.clone().sub(new THREE.Vector3(model.position.x, model.position.y, 0));
+  }
+
+  /**
+   * The model's surface where a ray from `origin` (bed mm) along `dir` first meets it, from either side:
+   * { point, normal (out of the model, bed frame), distance } or null.
+   */
+  surfaceAt(model, origin, dir) {
+    model.mesh.updateMatrixWorld();
+    const ray = new THREE.Raycaster(origin, dir.clone().normalize());
+    ray.firstHitOnly = true;
+    const side = model.material.side;
+    model.material.side = THREE.DoubleSide; // from inside the model its walls face away
+    const hit = ray.intersectObject(model.mesh, false)[0];
+    model.material.side = side;
+    if (!hit) return null;
+    return { point: hit.point, normal: this.worldNormal(model, hit.face.normal), distance: hit.distance };
+  }
+
+  /** A face normal from the model's own corners to the bed frame (scale squashes normals the other way). */
+  worldNormal(model, n) {
+    return n.clone().divide(model.mesh.scale).normalize();
+  }
+
+  /** How far the model goes in from `point` along -`normal` before coming out again (mm; Infinity: never). */
+  depthAt(model, point, normal) {
+    const n = normal.clone().normalize();
+    const hit = this.surfaceAt(model, point.clone().addScaledVector(n, -0.05), n.clone().negate());
+    return hit ? hit.distance + 0.05 : Infinity;
+  }
+
+  /** See-through solids over `model` (model mm triangle soups; null hides them). */
+  setGhost(model, soups = []) {
+    if (this.ghost) {
+      this.scene.remove(this.ghost);
+      this.ghost.geometry.dispose();
+      this.ghost.material.dispose();
+      this.ghost = null;
+    }
+    if (model && soups.length) {
+      const all = new Float32Array(soups.reduce((n, s) => n + s.length, 0));
+      let o = 0;
+      for (const s of soups) {
+        all.set(s, o);
+        o += s.length;
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(all, 3));
+      this.ghost = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x3e63dd, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthTest: false, depthWrite: false }));
+      this.ghost.position.set(model.position.x, model.position.y, 0);
+      this.ghost.renderOrder = 11;
+      this.ghost.raycast = () => {};
+      this.scene.add(this.ghost);
+    }
+    this.requestRender();
+  }
+
+  /**
+   * Swap `model` for a new shape (model mm corners), keeping its name, scale and place on the bed. One
+   * Undo step. Returns the new model, or null when the plate would pass the slicer's triangle limit.
+   */
+  replaceModel(model, mm, label) {
+    const index = this.models.indexOf(model);
+    if (index < 0) return null;
+    if (this.trianglesAfterSplit(model, [{ positions: mm }]) > LIMITS.maxTriangles) return null;
+    const s = model.mesh.scale;
+    const p = new Float32Array(mm.length);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < mm.length; i += 3) {
+      p[i] = mm[i] / s.x;
+      p[i + 1] = mm[i + 1] / s.y;
+      p[i + 2] = mm[i + 2] / s.z;
+      if (mm[i] < x0) x0 = mm[i];
+      if (mm[i] > x1) x1 = mm[i];
+      if (mm[i + 1] < y0) y0 = mm[i + 1];
+      if (mm[i + 1] > y1) y1 = mm[i + 1];
+    }
+    const m = new Model(model.name, p); // centres itself: move it back by how far its middle moved
+    m.fileBase = model.fileBase ?? model.name;
+    m.mesh.scale.copy(s);
+    m.position.set(model.position.x + (x0 + x1) / 2, model.position.y + (y0 + y1) / 2, 0);
+    this.paint(m);
+    this.detach(model);
+    this.attach(m, index);
+    const place = m.position.clone();
+    this.record({
+      label,
+      undo: () => {
+        this.detach(m);
+        this.attach(model, index);
+      },
+      redo: () => {
+        this.detach(model);
+        m.position.copy(place);
+        this.attach(m, index);
+      },
+      models: [model, m],
+    });
+    this.select(m);
+    this.changed();
+    return m;
+  }
+
   select(model) {
     this.selectMany(model ? [model] : [], model ?? null);
   }
@@ -1478,7 +1599,8 @@ export class Viewer extends EventTarget {
     if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) >= 5) return;
     const hit = this.pick(e);
     if (hit && !this.selection.has(hit.model)) this.select(hit.model);
-    this.emit('menu', { model: hit?.model ?? null, point: hit?.point ?? null, x: e.clientX, y: e.clientY });
+    const normal = hit?.face ? this.worldNormal(hit.model, hit.face.normal) : null;
+    this.emit('menu', { model: hit?.model ?? null, point: hit?.point ?? null, normal, x: e.clientX, y: e.clientY });
   }
 
   // ---- Saving the plate in the browser (plate-store.js) --------------------------------------

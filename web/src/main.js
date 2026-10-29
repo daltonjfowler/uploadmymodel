@@ -4,6 +4,7 @@
 
 import './style.css';
 import { LIMITS, PRINTER, formatMinutes, gcodeFileName, materialById, summarize } from '../../shared/settings.js';
+import { Vector3 } from 'three';
 import { $, confirmDialog, el, esc, fmt } from './dom.js';
 import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.js';
 import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
@@ -382,11 +383,20 @@ function renderTools() {
     cut = null; // picked something else: the planes go
     viewer.setCutPlanes(null);
   }
+  // picked something else, or another tool (a turn or scale would leave the servo's spot behind)
+  if (servo && (count !== 1 || m !== servo.model || !viewer.models.includes(servo.model) || tool !== servo.tool)) {
+    servo = null;
+    viewer.setGhost(null);
+  }
   p.hidden = !count;
   if (!count) return;
   p.innerHTML = '';
   if (cut) {
     renderCutPanel(p, m);
+    return;
+  }
+  if (servo) {
+    renderServoPanel(p, m);
     return;
   }
   if (count > 1 || !m) {
@@ -408,6 +418,7 @@ function renderTools() {
     p.append(el('p', { class: 'note' }, 'Drag the model to move it. It always sits on the bed. 0, 0 is the middle.'));
     p.append(button('⊕ Center on the bed', () => viewer.setPosition(m, 0, 0), 'wide'));
     p.append(splitPicker());
+    p.append(button('⚙ Add a servo (9 g)…', () => startServo(), 'wide'));
   }
 
   if (tool === 'scale') {
@@ -604,6 +615,10 @@ function startCut(axis = 'z', at = null, point = null) {
   if (!m || viewer.selection.size !== 1) {
     toast('Click one model first, then split it by plane.');
     return;
+  }
+  if (servo) {
+    servo = null;
+    viewer.setGhost(null);
   }
   cut = { model: m, planes: [] };
   addCutPlane(axis, at, point);
@@ -807,6 +822,145 @@ function splitPicker() {
   return s;
 }
 
+// ---- Servo pocket or mount (csg-tools.js) -----------------------------------------------------
+// Dalton, 2026-10-28: a place for an Arduino kit's 9 g servo (SG90 / MG90S). Pocket: sunk into the
+// model. Mount: a block on the surface with the pocket in its top, for thin parts. The CSG library is
+// only loaded when a student asks for a servo, so the page stays light.
+
+let csg = null; // csg-tools.js, once loaded
+let servo = null; // { model, at, normal (model mm, bed frame), kind: 'pocket' | 'mount', spin } while placing one
+
+async function startServo(point = null, normal = null) {
+  const m = viewer.selected;
+  if (!m || viewer.selection.size !== 1) {
+    toast('Click one model first, then add a servo to it.');
+    return;
+  }
+  if (!point || !normal) { // no spot picked: the top of the model, straight down from above its middle
+    const b = viewer.worldBox(m);
+    const hit = viewer.surfaceAt(m, new Vector3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, b[5] + 20), new Vector3(0, 0, -1));
+    if (!hit) {
+      toast('Right-click the model where the servo should go.');
+      return;
+    }
+    ({ point, normal } = hit);
+  }
+  if (!csg) {
+    busy('Loading…');
+    try {
+      csg = await import('./csg-tools.js');
+    } catch {
+      toast('Could not load the servo tool. Check the Wi-Fi and try again.', { kind: 'error' });
+      return;
+    } finally {
+      busy(null);
+    }
+  }
+  if (cut) endCut();
+  servo = { model: m, tool, at: viewer.toModelMm(m, point), normal: normal.clone().normalize(), kind: servo?.kind ?? 'pocket', spin: servo?.spin ?? 0 };
+  renderTools();
+}
+
+function endServo() {
+  if (!servo) return;
+  servo = null;
+  viewer.setGhost(null);
+  renderTools();
+}
+
+/** The solids for the servo as it is set up now: { adds, cuts }. */
+function servoSolids() {
+  const { at, normal, kind, spin } = servo;
+  return kind === 'mount' ? csg.servoMount(at, normal, spin) : { adds: [], cuts: csg.servoPocket(at, normal, spin) };
+}
+
+function showServoGhost() {
+  const { adds, cuts } = servoSolids();
+  viewer.setGhost(servo.model, [...adds, ...cuts]);
+}
+
+async function applyServo() {
+  if (!servo) return;
+  const { model, kind } = servo;
+  busy(kind === 'mount' ? 'Adding the servo mount…' : 'Cutting the servo pocket…');
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+  let out;
+  try {
+    out = csg.combine(viewer.modelMm(model), servoSolids());
+  } catch (err) {
+    console.error(err);
+    toast('The servo could not be added here. Try another spot, or check the model (it may have holes).', { kind: 'error', timeout: 10000 });
+    return;
+  } finally {
+    busy(null);
+  }
+  const made = viewer.replaceModel(model, out, kind === 'mount' ? 'servo mount' : 'servo pocket');
+  if (!made) {
+    toast(`With the servo, the plate would have too much detail to slice (the most is ${fmt(LIMITS.maxTriangles)} triangles). Remove a model first.`, { kind: 'error', timeout: 10000 });
+    return;
+  }
+  servo = null;
+  viewer.setGhost(null);
+  renderTools();
+  const entry = viewer.undoStack.at(-1);
+  checkHealth(made, { quiet: true });
+  toast(`${kind === 'mount' ? 'Servo mount added' : 'Servo pocket cut'}. A 9 g servo (SG90 or MG90S) pushes in; two small screws hold it.`, {
+    timeout: 8000,
+    action: () => {
+      if (viewer.undoStack.at(-1) === entry) undo();
+      else toast('Something else changed since then. Use the Undo button to step back.', { key: 'history' });
+    },
+    actionLabel: 'Undo',
+    key: 'history',
+  });
+}
+
+function renderServoPanel(p, m) {
+  const title = el('div', { class: 'tp-title' });
+  title.innerHTML = `<strong>Servo (9 g)</strong><span class="tp-model">${esc(m.name)}</span>`;
+  p.append(title);
+  const kinds = el('div', { class: 'seg servokind', role: 'group', 'aria-label': 'Servo kind' });
+  for (const [k, label] of [['pocket', 'Pocket (sunk in)'], ['mount', 'Mount (block on top)']]) {
+    const b = button(label, () => {
+      servo.kind = k;
+      renderTools();
+    }, servo.kind === k ? 'on' : '');
+    b.setAttribute('aria-pressed', String(servo.kind === k));
+    kinds.append(b);
+  }
+  p.append(kinds);
+
+  const row = el('div', { class: 'cutctl' });
+  const range = el('input', { type: 'range', min: 0, max: 180, step: 5, 'aria-label': 'Servo spin' });
+  const num = el('input', { type: 'number', min: 0, max: 180, step: 5, inputmode: 'decimal', 'aria-label': 'Servo spin, number' });
+  range.value = num.value = String(servo.spin);
+  const put = (raw) => {
+    const v = Math.round(Math.min(180, Math.max(0, Number(raw))));
+    if (Number.isFinite(v)) servo.spin = v;
+    range.value = num.value = String(servo.spin);
+    showServoGhost();
+  };
+  range.addEventListener('input', () => put(range.value));
+  num.addEventListener('change', () => put(num.value));
+  row.append(el('span', { class: 'sub-label' }, 'Spin'), range, num, el('span', { class: 'unit' }, '°'));
+  p.append(row);
+
+  if (servo.kind === 'pocket') {
+    const world = servo.at.clone().add(new Vector3(m.position.x, m.position.y, 0));
+    const depth = viewer.depthAt(m, world, servo.normal);
+    const need = csg.servoDepth() + 1;
+    const thick = Number.isFinite(depth) ? `${fmt(depth, 1)} mm` : 'very';
+    p.append(depth < need
+      ? el('p', { class: 'advice warn' }, `Too thin here (${thick} thick, a pocket needs ${fmt(need, 0)} mm): it would go right through. Pick a thicker spot, or use Mount.`)
+      : el('p', { class: 'note' }, `The model is ${thick} thick here; the pocket goes ${fmt(need - 1, 0)} mm in.`));
+  }
+  const go = el('div', { class: 'btn-row' });
+  go.append(button(servo.kind === 'mount' ? '⚙ Add mount' : '⚙ Cut pocket', applyServo, 'primary'), button('Cancel', endServo));
+  p.append(go);
+  p.append(el('p', { class: 'note' }, 'For the 9 g micro servo in Arduino kits (SG90 or MG90S). The see-through shape shows what is cut away. It pushes in by hand, two small screws hold it, and a slot lets the wire out. Right-click the model to move it to another spot.'));
+  showServoGhost();
+}
+
 // ---- Right-click menu on the plate ------------------------------------------------------------
 
 const menu = $('#ctxMenu');
@@ -817,11 +971,12 @@ function closeMenu() {
   menu.innerHTML = '';
 }
 
-function openMenu({ model, point, x, y }) {
+function openMenu({ model, point, normal, x, y }) {
   const count = viewer.selection.size;
   const here = cut && model === cut.model && point;
   const items = model
     ? [
+      ...(servo && model === servo.model && point && normal ? [['⚙', 'Move the servo here', () => startServo(point, normal)], null] : []),
       ...(here ? [
         ['＋', 'Cut plane here: flat (Z)', () => addCutPlane('z', point.z, point)],
         ['＋', 'Cut plane here: left | right (X)', () => addCutPlane('x', point.x, point)],
@@ -831,6 +986,7 @@ function openMenu({ model, point, x, y }) {
       ['✂', count > 1 ? 'Split each into separate objects' : 'Split into separate objects', () => splitSelected()],
       ['✂', 'Split every loose piece', () => splitSelected({ loose: true })],
       ...(count === 1 && !cut ? [['▤', 'Split by plane…', () => startCut('z', point?.z ?? null, point ?? null)]] : []),
+      ...(count === 1 && !servo && point && normal ? [['⚙', 'Servo here (9 g)…', () => startServo(point, normal)]] : []),
       null,
       ['⧉', 'Copy', duplicateSelected, 'Ctrl+D'],
       ['⬇', count > 1 ? 'Lay each one flat' : 'Biggest flat side down', () => viewer.forSelected('lay flat', (m) => viewer.layFlatAuto(m))],
@@ -1473,6 +1629,11 @@ window.addEventListener('keydown', (e) => {
   if (cut && e.key === 'Escape') {
     e.preventDefault();
     endCut();
+    return;
+  }
+  if (servo && e.key === 'Escape') {
+    e.preventDefault();
+    endServo();
     return;
   }
   const m = viewer.selected;

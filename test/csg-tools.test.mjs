@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Vector3 } from 'three';
-import { combine, connectorSpots, dowelPin, hole, peg, servoPocket, SERVO_9G } from '../web/src/csg-tools.js';
+import { combine, connectorSpots, dowelPin, hole, peg, servoDepth, servoMount, servoPocket, SERVO_9G } from '../web/src/csg-tools.js';
 import { meshHealth } from '../web/src/mesh-health.js';
 
 function box(x, y, z, sx, sy = sx, sz = sx) {
@@ -92,4 +92,20 @@ test('dowels on a cut: holes in both pieces and loose pins', async () => {
   for (const p of pieces) closed(p.positions, 'dowel piece');
   assert.ok(extras.length >= 1, 'pins to print');
   for (const pin of extras) closed(pin, 'pin');
+});
+
+test('a servo mount on a thin plate: a block with the pocket in its top, all one closed solid', () => {
+  const plate = box(0, 0, 0, 60, 40, 4); // 4 mm: far too thin for a pocket
+  assert.ok(servoDepth() > 18, 'a pocket needs about 19 mm');
+  const m = servoMount(new Vector3(30, 20, 4), UP, 90);
+  const out = combine(plate, m);
+  closed(out, 'plate with servo mount');
+  let z1 = -Infinity;
+  for (let i = 2; i < out.length; i += 3) z1 = Math.max(z1, out[i]);
+  near(z1, 4 + m.height, 1e-3, 'block top');
+  const s = SERVO_9G, c = s.clearance;
+  const block = (s.tabs[0] + 2 * c + 4) * (s.tabs[1] + 2 * c + 4) * m.height;
+  const pocket = (s.body[0] + 2 * c) * (s.body[1] + 2 * c) * (s.bodyDepth + s.tabDepth);
+  const added = volume(out) - 60 * 40 * 4;
+  assert.ok(added < block - pocket && added > block - pocket - 1200, `added ${added.toFixed(0)} mm³`);
 });

@@ -332,6 +332,31 @@ export function servoPocket(at, normal, spinDeg = 0, s = SERVO_9G) {
   return parts.map((g) => solid(g, turn));
 }
 
+/** How deep a servo pocket goes into the model, mm (body + tabs, or the screw holes if deeper). */
+export function servoDepth(s = SERVO_9G) {
+  return Math.max(s.bodyDepth + s.tabDepth, s.tabDepth + s.screwDepth);
+}
+
+/**
+ * A servo mount for a thin part (Dalton, 2026-10-28): a block standing on the surface at `at` (sunk
+ * `sink` mm into it, so it joins on a curved face too) with the servo pocket in its top, `floor` mm of
+ * block left under the servo. Returns { adds: [block], cuts: pocket solids, height }.
+ */
+export function servoMount(at, normal, spinDeg = 0, s = SERVO_9G, { wall = 2, floor = 2, sink = 2 } = {}) {
+  const n = normal.clone().normalize();
+  const c = s.clearance;
+  const height = servoDepth(s) + floor;
+  const [l, w] = [s.tabs[0] + 2 * c + 2 * wall, s.tabs[1] + 2 * c + 2 * wall];
+  const g = new THREE.BoxGeometry(l, height + sink, w);
+  g.translate(0, (height - sink) / 2, 0);
+  const turn = new THREE.Matrix4()
+    .makeTranslation(at.x, at.y, at.z)
+    .multiply(turnFromY(n))
+    .multiply(new THREE.Matrix4().makeRotationY((spinDeg * Math.PI) / 180));
+  const top = at.clone().addScaledVector(n, height);
+  return { adds: [solid(g, turn)], cuts: servoPocket(top, n, spinDeg, s), height };
+}
+
 // ---- connectors on a plane cut ------------------------------------------------------------------
 
 const PLANE_AXES = { x: [1, 2], y: [2, 0], z: [0, 1] }; // the cut face's two axes, as plane-cut.js uses
