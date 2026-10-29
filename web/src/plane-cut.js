@@ -468,3 +468,46 @@ export function planeCovers(frame, points) {
     return Math.abs(dot(d, frame.u)) <= frame.half[0] + tol && Math.abs(dot(d, frame.v)) <= frame.half[1] + tol;
   });
 }
+
+/**
+ * A plane lying along a face (Dalton, 2026-10-28: make turning the plane easy): through bed point
+ * `point`, facing `normal`. Starts from the axis the face is closest to, so the tilts stay small,
+ * and finds the two tilts that turn that axis onto the face (a search: planeFrame is cheap).
+ * @returns {{ axis, at, tiltU, tiltV, du, dv }} plane fields, sized whole
+ */
+export function planeAlong(normal, point, box) {
+  const n = unit(normal);
+  const axis = ['x', 'y', 'z'][[0, 1, 2].reduce((best, k) => (Math.abs(n[k]) > Math.abs(n[best]) ? k : best), 0)];
+  const fit = (tu, tv) => Math.abs(dot(planeFrame({ axis, at: 0, tiltU: tu, tiltV: tv }, box).n, n)); // either side will do
+  let best = [0, 0], score = fit(0, 0);
+  for (let tu = -60; tu <= 60; tu += 2) {
+    for (let tv = -60; tv <= 60; tv += 2) {
+      const f = fit(tu, tv);
+      if (f > score) [best, score] = [[tu, tv], f];
+    }
+  }
+  for (const step of [1, 0.5, 0.1]) { // close in
+    let moved = true;
+    while (moved) {
+      moved = false;
+      for (const [a, b] of [[step, 0], [-step, 0], [0, step], [0, -step]]) {
+        const f = fit(best[0] + a, best[1] + b);
+        if (f > score + 1e-12) {
+          best = [best[0] + a, best[1] + b];
+          score = f;
+          moved = true;
+        }
+      }
+    }
+  }
+  const [tiltU, tiltV] = best.map((t) => Math.round(t * 10) / 10);
+  // `at` so the plane goes through the point, and the plane's middle slid onto it
+  const k = AXES[axis];
+  const mid = [0, 1, 2].map((i) => (box[i] + box[i + 3]) / 2);
+  const f = planeFrame({ axis, at: mid[k], tiltU, tiltV }, box);
+  const d = [0, 1, 2].map((i) => point[i] - f.c[i]);
+  const at = mid[k] + dot(f.n, d) / f.n[k];
+  const g = planeFrame({ axis, at, tiltU, tiltV }, box);
+  const e = [0, 1, 2].map((i) => point[i] - g.c[i]);
+  return { axis, at: Math.round(at * 1000) / 1000, tiltU, tiltV, du: Math.round(dot(e, g.u) * 10) / 10, dv: Math.round(dot(e, g.v) * 10) / 10 };
+}

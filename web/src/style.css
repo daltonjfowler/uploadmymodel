@@ -524,6 +524,8 @@ ul.plain { margin: 0; padding-left: 20px; color: var(--muted); }
 .cutrow .unit { color: var(--muted); font-size: .82rem; }
 .cutrow select, .cutrow input[type="number"] { min-width: 0; }
 .cutmore { grid-column: 1 / -1; }
+.cutrow.active { box-shadow: inset 3px 0 0 var(--accent); padding-left: 8px; }
+.note.tip { margin-top: 6px; }
 .cutmore summary { cursor: pointer; font-size: .85rem; color: var(--muted); padding: 2px 0; }
 .cutmore[open] summary { margin-bottom: 4px; }
 .cutctl { display: grid; grid-template-columns: minmax(0, 1fr) 4.5em 6.2em; gap: 2px 6px; align-items: center; margin-bottom: 6px; }

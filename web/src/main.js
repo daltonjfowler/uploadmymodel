@@ -10,7 +10,7 @@ import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.j
 import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
 import { meshHealth } from './mesh-health.js';
 import { closeHolesIfBetter } from './mesh-repair.js';
-import { PLANE_DIRS } from './plane-cut.js';
+import { PLANE_DIRS, planeAlong } from './plane-cut.js';
 import { PrinterUsb, cardLines, sdName } from './printer-usb.js';
 import { clearPlate, loadPlate, savePlate } from './plate-store.js';
 import { SettingsPanel } from './settings-panel.js';
@@ -80,7 +80,7 @@ function clockTime(ms) {
 const viewer = new Viewer($('#viewport'), PRINTER);
 const panel = new SettingsPanel($('#settings'), $('#hint'));
 // Browser tests reach the 3D view through this; only with ?debug in the address.
-if (new URLSearchParams(location.search).has('debug')) window.umm = { viewer, panel, servoState: () => servo };
+if (new URLSearchParams(location.search).has('debug')) window.umm = { viewer, panel, servoState: () => servo, cutState: () => cut };
 
 let tool = 'move';
 let stage = 'prepare'; // 'prepare' (plate + settings) or 'preview' (G-code layers)
@@ -640,7 +640,8 @@ async function splitSelected({ loose = false } = {}) {
 // Dalton, 2026-10-09: big prints in parts. Add flat cut planes (X, Y, Z), see them on the model, then
 // Cut: each piece gets its cut face filled (plane-cut.js) so it prints solid. Planes are in bed mm.
 
-let cut = null; // { model, planes: [{ axis, at, tiltU, tiltV, du, dv, w, h }] } while a split by plane is being set up
+let cut = null; // { model, planes: [{ axis, at, tiltU, tiltV, du, dv, w, h }], active } while a split by plane is being set up
+// (active: the plane the rings are on, and the one "Plane along this face" moves)
 const AXIS_K = { x: 0, y: 1, z: 2 };
 const AXIS_LABEL = { x: 'X (left | right)', y: 'Y (front | back)', z: 'Z (flat)' };
 
@@ -656,7 +657,7 @@ function startCut(axis = 'z', at = null, point = null) {
   }
   tool = 'split';
   viewer.setGizmo(null);
-  cut = { model: m, planes: [] };
+  cut = { model: m, planes: [], active: 0 };
   addCutPlane(axis, at, point);
 }
 
@@ -683,13 +684,27 @@ function addCutPlane(axis = null, at = null, point = null) {
   const used = new Set(cut.planes.map((p) => p.axis));
   axis ??= ['z', 'x', 'y'].find((a) => !used.has(a)) ?? 'z';
   cut.planes.push(newPlane(axis, at, point));
+  cut.active = cut.planes.length - 1;
+  showCut();
+}
+
+/** The active plane lies along the face the student right-clicked, through that spot. */
+function planeAlongFace(point, normal) {
+  if (!cut) return;
+  const pl = cut.planes[cut.active];
+  Object.assign(pl, planeAlong(normal.toArray(), point.toArray(), viewer.worldBox(cut.model)), { more: true });
   showCut();
 }
 
 function showCut() {
-  viewer.setCutPlanes(cut?.model ?? null, cut?.planes ?? []);
+  viewer.setCutPlanes(cut?.model ?? null, cut?.planes ?? [], cut?.active);
   renderTools();
 }
+
+// The rings on the plane were dragged: show the new tilt in the panel.
+viewer.addEventListener('cutplanes', () => {
+  if (cut) renderTools();
+});
 
 function endCut() {
   if (!cut) return;
@@ -753,7 +768,16 @@ function renderCutPanel(p, m) {
   cut.planes.forEach((pl, i) => {
     const k = AXIS_K[pl.axis];
     const [lo, hi] = [b[k], b[k + 3]];
-    const row = el('div', { class: 'cutrow' });
+    const row = el('div', { class: `cutrow${i === cut.active && cut.planes.length > 1 ? ' active' : ''}` });
+    // working on a plane moves the rings to it (no re-build: that would steal the focus)
+    const pick = () => {
+      if (cut.active === i) return;
+      cut.active = i;
+      for (const [j, r] of [...p.querySelectorAll('.cutrow')].entries()) r.classList.toggle('active', j === i);
+      viewer.setCutPlanes(cut.model, cut.planes, cut.active);
+    };
+    row.addEventListener('focusin', pick);
+    row.addEventListener('pointerdown', pick);
     const axis = el('select', { 'aria-label': `Plane ${i + 1} direction` });
     for (const a of ['x', 'y', 'z']) axis.append(new Option(AXIS_LABEL[a], a, false, a === pl.axis));
     axis.addEventListener('change', () => {
@@ -767,16 +791,17 @@ function renderCutPanel(p, m) {
     range.addEventListener('input', () => {
       pl.at = Number(range.value);
       num.value = String(pl.at);
-      viewer.setCutPlanes(cut.model, cut.planes);
+      viewer.setCutPlanes(cut.model, cut.planes, cut.active);
     });
     num.addEventListener('change', () => {
       const v = Number(num.value);
       if (Number.isFinite(v)) pl.at = Math.round(v * 10) / 10;
       range.value = String(pl.at);
-      viewer.setCutPlanes(cut.model, cut.planes);
+      viewer.setCutPlanes(cut.model, cut.planes, cut.active);
     });
     const rm = button('✕', () => {
       cut.planes.splice(i, 1);
+      cut.active = Math.min(cut.active, cut.planes.length - 1);
       if (cut.planes.length) showCut();
       else endCut();
     }, 'iconbtn');
@@ -788,21 +813,24 @@ function renderCutPanel(p, m) {
   const go = el('div', { class: 'btn-row' });
   go.append(button('✂ Cut', applyCut, 'primary'), button('Cancel', endCut));
   p.append(go);
-  p.append(el('p', { class: 'note' }, 'X cuts left from right, Y front from back, Z is a flat cut at a height above the bed. Every piece gets its cut face filled, so it prints solid; glue them after. Right-click the model to add a plane right where you click. Under Tilt and size, a plane can lean, and a smaller plane cuts only the parts it covers all the way across (an arm, an ear), not the rest.'));
+  p.append(el('p', { class: 'note' }, 'X cuts left from right, Y front from back, Z is a flat cut at a height above the bed. Every piece gets its cut face filled, so it prints solid; glue them after. Right-click the model to add a plane right where you click.'));
+  p.append(el('p', { class: 'note tip' }, 'To tilt a plane, drag the coloured rings on it, or right-click a slanted face: Plane along this face. Tilt and size has the exact numbers, and makes a plane smaller so it cuts only the parts it covers all the way across (an arm, an ear).'));
 }
 
 /**
  * "Tilt and size" for one plane (Dalton's coworker, 2026-10-28): lean it round its two directions, make
  * it smaller so it cuts only what it covers, and slide it along itself. Sliders plus number boxes.
  */
+const RING_COLOUR = { X: 'red', Y: 'green', Z: 'blue' }; // the rotate rings' colours
+
 function cutMore(pl, i, diag) {
   const [U, V] = PLANE_DIRS[pl.axis].map((a) => a.toUpperCase());
   const box = el('details', { class: 'cutmore' });
   box.open = Boolean(pl.more);
   box.addEventListener('toggle', () => { pl.more = box.open; });
   box.append(el('summary', {}, 'Tilt and size'));
-  const ctl = (label, { min, max, step, unit, get, set, whole = false }) => {
-    const name = `Plane ${i + 1} ${label.toLowerCase()}`;
+  const ctl = (label, { min, max, step, unit, get, set, whole = false, aria = label }) => {
+    const name = `Plane ${i + 1} ${aria.toLowerCase()}`;
     const range = el('input', { type: 'range', min, max, step, 'aria-label': name });
     const num = el('input', { type: 'number', min, max, step, inputmode: 'decimal', 'aria-label': `${name}, number` });
     const tag = el('span', { class: 'unit' });
@@ -816,7 +844,7 @@ function cutMore(pl, i, diag) {
       const v = Math.round(Math.min(max, Math.max(min, Number(raw))) * 10) / 10;
       if (Number.isFinite(v)) set(whole && v >= max ? null : v);
       show();
-      viewer.setCutPlanes(cut.model, cut.planes);
+      viewer.setCutPlanes(cut.model, cut.planes, cut.active);
     };
     range.addEventListener('input', () => put(range.value));
     num.addEventListener('change', () => put(num.value));
@@ -830,8 +858,8 @@ function cutMore(pl, i, diag) {
   // or twice the model, whichever is more. The top of the slider is "whole" (no edge at all).
   const biggest = Math.max(300, 2 * diag);
   box.append(
-    ctl(`Tilt round ${U}`, { min: -80, max: 80, step: 1, unit: '°', get: () => pl.tiltU, set: (v) => { pl.tiltU = v; } }),
-    ctl(`Tilt round ${V}`, { min: -80, max: 80, step: 1, unit: '°', get: () => pl.tiltV, set: (v) => { pl.tiltV = v; } }),
+    ctl(`Tilt round ${U} (${RING_COLOUR[U]} ring)`, { aria: `Tilt round ${U}`, min: -80, max: 80, step: 1, unit: '°', get: () => pl.tiltU, set: (v) => { pl.tiltU = v; } }),
+    ctl(`Tilt round ${V} (${RING_COLOUR[V]} ring)`, { aria: `Tilt round ${V}`, min: -80, max: 80, step: 1, unit: '°', get: () => pl.tiltV, set: (v) => { pl.tiltV = v; } }),
     ctl(`Size along ${U}`, { min: 2, max: biggest, step: 1, unit: 'mm', whole: true, get: () => pl.w, set: (v) => { pl.w = v; } }),
     ctl(`Size along ${V}`, { min: 2, max: biggest, step: 1, unit: 'mm', whole: true, get: () => pl.h, set: (v) => { pl.h = v; } }),
     ctl(`Slide along ${U}`, { min: -half, max: half, step: 0.5, unit: 'mm', get: () => pl.du, set: (v) => { pl.du = v; } }),
@@ -1255,6 +1283,7 @@ function openMenu({ model, point, normal, x, y }) {
     ? [
       ...(servo && model === servo.model && point && normal ? [['⚙', 'Move the servo here', () => startServo(point, normal)], null] : []),
       ...(here ? [
+        ...(normal ? [['∠', 'Plane along this face', () => planeAlongFace(point, normal)]] : []),
         ['＋', 'Cut plane here: flat (Z)', () => addCutPlane('z', point.z, point)],
         ['＋', 'Cut plane here: left | right (X)', () => addCutPlane('x', point.x, point)],
         ['＋', 'Cut plane here: front | back (Y)', () => addCutPlane('y', point.y, point)],

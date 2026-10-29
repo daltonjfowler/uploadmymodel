@@ -152,5 +152,89 @@ await page.waitForTimeout(1200);
 check('tilted plane: both towers cut', await models(), 2);
 check('tilted plane: every piece closed', await openEdges(), '0,0');
 
+// 7. Turning a plane the easy way (Dalton, 2026-10-28): drag a ring on it, or line it up with a face
+await page.evaluate(() => { window.umm.viewer.selectAll(); window.umm.viewer.removeSelected(); });
+await page.setInputFiles('#fileInput', stl('cube-rings.stl', [[0, 0, 0, 40, 40, 40]]));
+await page.waitForTimeout(800);
+await pickSplit('plane');
+check('rings on the plane', await page.evaluate(() => window.umm.viewer.planeRings.visible), true);
+// a point on a ring at angle a, on screen
+const ringPoint = (deg, which = 'tiltU') => page.evaluate(([a, w]) => {
+  const v = window.umm.viewer;
+  const g = v.planeRingParts[w].group;
+  g.updateMatrixWorld();
+  const p = g.localToWorld(new (v.camera.position.constructor)(Math.cos(a * Math.PI / 180), Math.sin(a * Math.PI / 180), 0));
+  p.project(v.camera);
+  const r = v.canvas.getBoundingClientRect();
+  return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height };
+}, [deg, which]);
+// the green ring (round Y) faces the camera from the front: go 30° round it
+// start where only the green ring is under the pointer (not where it crosses the red one)
+const grabs = (q) => page.evaluate(({ x, y }) => window.umm.viewer.hitPlaneRing({ clientX: x, clientY: y }), q);
+let best = null;
+for (let a = 0; a < 360 && !best; a += 15) {
+  if ((await grabs(await ringPoint(a, 'tiltV'))) === 'tiltV' && (await grabs(await ringPoint(a + 30, 'tiltV'))) === 'tiltV') best = { a };
+}
+let from = await ringPoint(best.a, 'tiltV');
+await page.mouse.move(from.x, from.y);
+await page.mouse.down();
+for (let k = 1; k <= 8; k++) {
+  const p = await ringPoint(best.a + (k * 30) / 8, 'tiltV');
+  await page.mouse.move(p.x, p.y);
+}
+await page.mouse.up();
+await page.waitForTimeout(300);
+const tiltV = await page.evaluate(() => window.umm.cutState().planes[0].tiltV);
+check('going round the green ring tilts the plane about 30°', Math.abs(Math.abs(tiltV) - 30) <= 5, true);
+check('the panel shows the new tilt', Number(await page.inputValue('#toolPanel input[aria-label="Plane 1 tilt round y, number"]')), tiltV);
+// the red ring (round X) is edge-on from the front: dragging up 40 px tilts it 20°
+from = await ringPoint(90, 'tiltU');
+await page.mouse.move(from.x, from.y);
+await page.mouse.down();
+for (let k = 1; k <= 8; k++) await page.mouse.move(from.x, from.y - k * 5);
+await page.mouse.up();
+await page.waitForTimeout(300);
+const tiltU = await page.evaluate(() => window.umm.cutState().planes[0].tiltU);
+check('dragging the edge-on red ring up tilts it 20°', tiltU, 20);
+await page.screenshot({ path: OUT + 'planecut-rings.png' });
+await page.keyboard.press('Escape');
+
+// a wedge: its slope rises 20 mm over 40 mm (26.6°); right-click it, Plane along this face
+await page.evaluate(() => { window.umm.viewer.selectAll(); window.umm.viewer.removeSelected(); });
+{
+  const tris = [
+    [[0, 0, 0], [0, 20, 0], [40, 20, 0]], [[0, 0, 0], [40, 20, 0], [40, 0, 0]], // bottom
+    [[40, 0, 0], [40, 20, 0], [40, 20, 20]], [[40, 0, 0], [40, 20, 20], [40, 0, 20]], // tall end
+    [[0, 0, 0], [40, 0, 20], [40, 20, 20]], [[0, 0, 0], [40, 20, 20], [0, 20, 0]], // slope
+    [[0, 0, 0], [40, 0, 0], [40, 0, 20]], [[0, 20, 0], [40, 20, 20], [40, 20, 0]], // sides
+  ];
+  const buf = Buffer.alloc(84 + tris.length * 50);
+  buf.writeUInt32LE(tris.length, 80);
+  let o = 84;
+  for (const t of tris) { o += 12; for (const p of t) for (const n of p) { buf.writeFloatLE(n, o); o += 4; } o += 2; }
+  writeFileSync(OUT + 'wedge.stl', buf);
+}
+await page.setInputFiles('#fileInput', OUT + 'wedge.stl');
+await page.waitForTimeout(800);
+await pickSplit('plane');
+const slope = await page.evaluate(() => {
+  const v = window.umm.viewer, m = v.models[0];
+  const p = m.position.clone(); p.z = 10; // the slope's middle (the wedge is centred on its box)
+  p.project(v.camera);
+  const r = v.canvas.getBoundingClientRect();
+  return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height };
+});
+await page.mouse.click(slope.x, slope.y, { button: 'right' });
+await page.waitForTimeout(300);
+check('menu offers a plane along the face', await page.isVisible('#ctxMenu button:has-text("Plane along this face")'), true);
+await page.click('#ctxMenu button:has-text("Plane along this face")');
+await page.waitForTimeout(300);
+const along = await page.evaluate(() => window.umm.cutState().planes[0]);
+check('plane along the slope: tilted 26.6°', Math.abs(Math.hypot(along.tiltU, along.tiltV) - 26.6) < 1, true);
+await page.screenshot({ path: OUT + 'planecut-along.png' });
+await page.click('#toolPanel button:has-text("✂ Cut")');
+await page.waitForTimeout(1200);
+check('cut along the slope: pieces closed', (await openEdges()).split(',').every((n) => n === '0'), true);
+
 check('no page errors', errors.join(' | '), '');
 await browser.close();

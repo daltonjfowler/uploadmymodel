@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ShapeUtils, Vector2 } from 'three';
-import { cutByPlanes, cutMesh, cutTilted, planeCovers, planeFrame } from '../web/src/plane-cut.js';
+import { cutByPlanes, cutMesh, cutTilted, planeAlong, planeCovers, planeFrame } from '../web/src/plane-cut.js';
 import { meshHealth } from '../web/src/mesh-health.js';
 
 function box(x, y, z, sx, sy = sx, sz = sx) {
@@ -226,4 +226,18 @@ test('a plane much bigger than the model is drawn that big and cuts all of it (D
   const { pieces, missed } = cutByPlanes(new Float32Array(box(0, 0, 0, 20)), [{ axis: 'z', at: 10, keep }]);
   assert.equal(pieces.length, 2);
   assert.equal(missed, 0);
+});
+
+test('planeAlong lines a plane up with a face, through the clicked point (Dalton, 2026-10-28)', () => {
+  const box = [0, 0, 0, 40, 40, 40];
+  for (const [nx, ny, nz] of [[0, 0, 1], [1, 0, 0], [0, -1, 0], [0.5, 0, 0.866], [0, 0.6, 0.8], [-0.3, 0.4, 0.866], [0.7, 0.7, 0.14]]) {
+    const n = [nx, ny, nz].map((v) => v / Math.hypot(nx, ny, nz));
+    const p = [12, 25, 30];
+    const pl = planeAlong(n, p, box);
+    const f = planeFrame(pl, box);
+    near(Math.abs(n[0] * f.n[0] + n[1] * f.n[1] + n[2] * f.n[2]), 1, `faces the same way as ${n.map((v) => v.toFixed(2))}`);
+    near(f.n[0] * (p[0] - f.c[0]) + f.n[1] * (p[1] - f.c[1]) + f.n[2] * (p[2] - f.c[2]), 0, 'goes through the point');
+    assert.ok(Math.hypot(p[0] - f.c[0], p[1] - f.c[1], p[2] - f.c[2]) < 0.2, 'centred on the point');
+    assert.ok(Math.abs(pl.tiltU) <= 60 && Math.abs(pl.tiltV) <= 60, 'small tilts');
+  }
 });

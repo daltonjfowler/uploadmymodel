@@ -14,7 +14,7 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree } from 'three-mesh-bvh';
 import { LINE_TYPES } from './gcode.js';
-import { cutByPlanes, planeCovers, planeFrame } from './plane-cut.js';
+import { cutByPlanes, PLANE_DIRS, planeCovers, planeFrame } from './plane-cut.js';
 import { LIMITS } from '../../shared/settings.js';
 
 // Picking a 500k-triangle model by testing every triangle takes ~0.25 s on a slow Chromebook, too
@@ -753,8 +753,12 @@ export class Viewer extends EventTarget {
     return [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z];
   }
 
-  /** Show see-through cut planes over `model` (null hides them). Colours match the rotate rings. */
-  setCutPlanes(model, planes = []) {
+  /**
+   * Show see-through cut planes over `model` (null hides them). Colours match the rotate rings. The
+   * `active` plane (the last one by default) gets two rings to drag, which tilt it.
+   */
+  setCutPlanes(model, planes = [], active = planes.length - 1) {
+    this.cutState = model && planes.length ? { model, planes, active: Math.min(active, planes.length - 1) } : null;
     if (!this.cutGroup) {
       this.cutGroup = new THREE.Group();
       this.scene.add(this.cutGroup);
@@ -787,7 +791,127 @@ export class Viewer extends EventTarget {
         this.cutGroup.add(mesh);
       }
     }
+    this.updatePlaneRings();
     this.requestRender();
+  }
+
+  // ---- Rings on the cut plane (Dalton, 2026-10-28: "make rotating the plane intuitive") ------------
+  // Two rings round the active plane's middle, one per tilt: drag one and the plane leans round that
+  // ring's axis, in 5° steps, the angle shown by the pointer. Same feel as the model's rotate rings.
+
+  updatePlaneRings() {
+    if (!this.planeRings) {
+      this.planeRings = new THREE.Group();
+      this.planeRingParts = {};
+      for (const which of ['tiltU', 'tiltV']) {
+        const group = new THREE.Group();
+        const vis = new THREE.Mesh(
+          new THREE.TorusGeometry(1, 0.03, 8, 128),
+          new THREE.MeshBasicMaterial({ depthTest: false, transparent: true, opacity: 0.95 }),
+        );
+        vis.renderOrder = 12;
+        const hit = new THREE.Mesh(new THREE.TorusGeometry(1, 0.09, 6, 64), new THREE.MeshBasicMaterial({ visible: false }));
+        hit.userData.which = which;
+        group.add(vis, hit);
+        this.planeRings.add(group);
+        this.planeRingParts[which] = { group, vis, hit };
+      }
+      this.scene.add(this.planeRings);
+    }
+    const st = this.cutState;
+    this.planeRings.visible = !!st && this.stage !== 'preview';
+    if (!st || this.planeDrag) return;
+    const pl = st.planes[st.active];
+    const box = this.worldBox(st.model);
+    const f = planeFrame(pl, box);
+    const flat = planeFrame({ axis: pl.axis, at: pl.at }, box); // the fixed lines the tilts turn round
+    const color = { x: 0xe5484d, y: 0x30a46c, z: 0x3e63dd };
+    const names = PLANE_DIRS[pl.axis];
+    const r = Math.max(12, Math.min(f.draw.w, f.draw.h) * 0.42);
+    this.planeRings.position.set(...f.c);
+    for (const [i, which] of ['tiltU', 'tiltV'].entries()) {
+      const part = this.planeRingParts[which];
+      const axis = new THREE.Vector3(...(i ? flat.v : flat.u));
+      part.axis = axis;
+      part.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), axis); // a ring lies round its axis
+      part.group.scale.setScalar(r * (i ? 0.86 : 1)); // two sizes, so they never sit on each other
+      part.vis.material.color.setHex(color[names[i]]);
+    }
+  }
+
+  hitPlaneRing(e) {
+    if (!this.planeRings?.visible) return null;
+    this.setRay(e);
+    const hits = this.raycaster.intersectObjects(Object.values(this.planeRingParts).map((p) => p.hit), false);
+    return hits[0]?.object.userData.which ?? null;
+  }
+
+  planeRingAngle(e) {
+    const d = this.planeDrag;
+    this.setRay(e);
+    const p = this.raycaster.ray.intersectPlane(d.plane, new THREE.Vector3());
+    if (!p) return null;
+    const v = p.sub(d.center);
+    return Math.atan2(v.dot(d.w), v.dot(d.u));
+  }
+
+  startPlaneRingDrag(e, which) {
+    const st = this.cutState;
+    const n = this.planeRingParts[which].axis.clone();
+    const u = Math.abs(n.z) < 0.9 ? new THREE.Vector3(0, 0, 1).cross(n).normalize() : new THREE.Vector3(1, 0, 0);
+    const w = n.clone().cross(u); // u, w, n right-handed: the angle grows the way the tilt does
+    const center = this.planeRings.position.clone();
+    const pl = st.planes[st.active];
+    this.planeDrag = { which, pl, n, u, w, center, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(n, center), start: pl[which] ?? 0, total: 0 };
+    // A ring seen edge-on (the camera looks along its face) is a line on screen: going round it means
+    // nothing, so then dragging up or down tilts it instead.
+    const look = center.clone().sub(this.camera.position).normalize();
+    if (Math.abs(look.dot(n)) < 0.3) {
+      this.planeDrag.screenY = e.clientY;
+      return true;
+    }
+    const a = this.planeRingAngle(e);
+    if (a === null) {
+      this.planeDrag = null;
+      return false;
+    }
+    this.planeDrag.last = a;
+    for (const [k, part] of Object.entries(this.planeRingParts)) part.vis.material.opacity = k === which ? 1 : 0.25;
+    return true;
+  }
+
+  movePlaneRingDrag(e) {
+    const d = this.planeDrag;
+    if (d.screenY !== undefined) d.total = THREE.MathUtils.degToRad((d.screenY - e.clientY) / 2); // ½° a pixel, up = +
+    else {
+      const a = this.planeRingAngle(e);
+      if (a === null) return;
+      let delta = a - d.last;
+      if (delta > Math.PI) delta -= 2 * Math.PI;
+      if (delta < -Math.PI) delta += 2 * Math.PI;
+      d.last = a;
+      d.total += delta;
+    }
+    const deg = Math.max(-80, Math.min(80, Math.round((d.start + THREE.MathUtils.radToDeg(d.total)) / 5) * 5));
+    if (deg !== d.pl[d.which]) {
+      d.pl[d.which] = deg;
+      const st = this.cutState;
+      this.setCutPlanes(st.model, st.planes, st.active);
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    this.angleLabel.textContent = `${deg}°`;
+    this.angleLabel.style.left = `${e.clientX - rect.left + 16}px`;
+    this.angleLabel.style.top = `${e.clientY - rect.top - 10}px`;
+    this.angleLabel.hidden = false;
+  }
+
+  endPlaneRingDrag() {
+    this.planeDrag = null;
+    this.angleLabel.hidden = true;
+    for (const part of Object.values(this.planeRingParts)) part.vis.material.opacity = 0.95;
+    this.updatePlaneRings();
+    this.requestRender();
+    this.emit('cutplanes'); // the panel shows the new tilt
   }
 
   /**
@@ -1455,7 +1579,7 @@ export class Viewer extends EventTarget {
 
   /** True while a model or a rotate ring is being dragged: plate keys must wait. */
   get busy() {
-    return !!(this.drag || this.ringDrag);
+    return !!(this.drag || this.ringDrag || this.planeDrag);
   }
 
   onPointerDown(e) {
@@ -1470,6 +1594,13 @@ export class Viewer extends EventTarget {
     if (this.stage === 'preview') return; // the camera still works; models cannot be touched
     if (e.button !== 0 || e.shiftKey) return; // right-drag and Shift + drag pan the camera
     if (!this.layFlatPicking && !(e.ctrlKey || e.metaKey)) {
+      const tilt = this.hitPlaneRing(e);
+      if (tilt && this.startPlaneRingDrag(e, tilt)) {
+        e.stopImmediatePropagation();
+        this.down = null;
+        this.canvas.setPointerCapture(e.pointerId);
+        return;
+      }
       const axis = this.hitRing(e);
       if (axis && this.startRingDrag(e, axis)) {
         e.stopImmediatePropagation();
@@ -1517,6 +1648,10 @@ export class Viewer extends EventTarget {
   }
 
   onPointerMove(e) {
+    if (this.planeDrag) {
+      this.movePlaneRingDrag(e);
+      return;
+    }
     if (this.ringDrag) {
       this.moveRingDrag(e);
       return;
@@ -1545,11 +1680,16 @@ export class Viewer extends EventTarget {
     const now = performance.now();
     if (now - (this.lastHover ?? 0) < 80) return;
     this.lastHover = now;
-    const ring = this.hitRing(e);
+    const ring = this.hitPlaneRing(e) || this.hitRing(e);
     this.canvas.style.cursor = ring ? 'alias' : this.pick(e, { hover: true }) ? 'grab' : '';
   }
 
   onPointerUp(e) {
+    if (this.planeDrag) {
+      if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
+      this.endPlaneRingDrag();
+      return;
+    }
     if (this.ringDrag) {
       if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
       this.endRingDrag();
