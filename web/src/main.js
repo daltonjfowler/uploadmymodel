@@ -20,6 +20,7 @@ import { Viewer } from './viewer.js';
 
 const STORE_NAME = 'umm.name';
 const STORE_PHRASE = 'umm.phrase'; // this tab only (sessionStorage), like the sister sites
+const PAGE_TITLE = document.title; // a place in line goes in front of it while waiting
 
 // Is slicing open? Asked of the Worker (never the slicer, so it costs nothing): on load, every two
 // minutes, and before each slice. engine=false means this site has no slicer, so no gate.
@@ -1487,26 +1488,50 @@ function renderAction() {
   }
 
   if (slice.state === 'slicing') {
+    // Dalton, 2026-10-29: your place in line, big enough to see from across the room. Only while
+    // other students' models are ahead (src/line.js); the tab title says it too, for another tab.
+    const place = el('div', { class: 'line-place', role: 'status', hidden: '' });
+    const placeBig = el('strong', {});
+    const placeSmall = el('span', {});
+    place.append(placeBig, placeSmall);
+    card.append(place);
     card.append(el('div', { class: 'progress', role: 'progressbar', 'aria-label': 'Slicing' }, ''));
     // Supported models can take a minute on the school's slicer: show that it is still working.
     const status = el('p', { class: 'note slicing-note' });
+    const show = (node, text) => {
+      if (node.textContent !== text) node.textContent = text; // unchanged text is not read out again
+    };
     const tick = () => {
       // Waiting for a free slicer (other students' models are ahead): say where in line.
       const line = slice.line;
       if (line?.state === 'waiting') {
         const wait = line.startsInSeconds >= 60 ? `about ${Math.round(line.startsInSeconds / 60)} min` : `about ${Math.max(5, Math.round(line.startsInSeconds / 5) * 5)} s`;
-        status.textContent = line.ahead === 0
-          ? `You are next in line for the slicer. Starting in ${wait}.`
-          : `In line for the slicer: ${line.ahead} ${line.ahead === 1 ? 'model' : 'models'} ahead of you. Starting in ${wait}.`;
+        place.hidden = false;
+        show(placeBig, line.ahead === 0 ? 'You are next' : `#${line.ahead + 1} in line`);
+        show(placeSmall, line.ahead === 0
+          ? `Starting in ${wait}.`
+          : `${line.ahead} ${line.ahead === 1 ? 'model' : 'models'} ahead of you. Starting in ${wait}.`);
+        show(status, 'Waiting for a free slicer. Keep this tab open: you keep your place.');
+        document.title = `(${line.ahead === 0 ? 'Next' : `#${line.ahead + 1}`} in line) ${PAGE_TITLE}`;
         return;
       }
+      place.hidden = true;
+      document.title = PAGE_TITLE;
       const s = Math.round((Date.now() - (slice.slicingSince ?? slice.startedAt)) / 1000);
       const usesSupport = panel.value.support !== 'none';
-      status.textContent = `Slicing… ${s} s.${s >= 120 ? ' A big plate can take up to 8 minutes. Keep this tab open.' : s >= 8 && usesSupport ? ' Supports take the longest, up to a minute or two.' : ''}`;
+      show(status, `Slicing… ${s} s.${s >= 120 ? ' A big plate can take up to 8 minutes. Keep this tab open.' : s >= 8 && usesSupport ? ' Supports take the longest, up to a minute or two.' : ''}`);
     };
     tick();
+    slice.tick = tick; // watchLine shows a new place at once, not on the next second
     clearInterval(slice.timer);
-    slice.timer = setInterval(() => (status.isConnected ? tick() : clearInterval(slice.timer)), 1000);
+    // Each timer stops ITSELF once its card is gone. (It used to stop slice.timer, which by then
+    // was the next slice's timer: every slice after the first froze on "Slicing… 0 s".)
+    const timer = setInterval(() => {
+      if (status.isConnected) return tick();
+      clearInterval(timer);
+      if (slice.state !== 'slicing') document.title = PAGE_TITLE;
+    }, 1000);
+    slice.timer = timer;
     card.append(status);
     const cancel = el('button', { type: 'button', class: 'wide' }, 'Cancel');
     cancel.addEventListener('click', () => {
@@ -1822,6 +1847,7 @@ async function watchLine(ticket) {
       if (line?.state === 'none') return; // no line on this server (local dev without one)
       if (line?.state !== 'waiting' && slice.line?.state === 'waiting') slice.slicingSince = Date.now();
       slice.line = line;
+      slice.tick?.();
     } catch { /* Wi-Fi blip: try again next time */ }
     await new Promise((r) => setTimeout(r, 2000));
   }

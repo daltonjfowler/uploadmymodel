@@ -13,8 +13,8 @@ const base = process.argv[2] || 'http://127.0.0.1:8787/';
 // Prefer UMM_TEACHER_KEY: a key on the command line gets echoed by npm into logs.
 const key = process.env.UMM_TEACHER_KEY || process.argv[3] || 'local-test-key-not-real';
 const live = !/127\.0\.0\.1|localhost/.test(base);
-const tests = ['undo', 'angle', 'multi', 'preview', 'autosave', 'health', 'threemf', 'units', 'split', 'planecut', 'servo', 'supports', 'a11y', 'usb', 'usbcopy', 'arm', 'material', 'teacher', 'fixes', ...(live ? [] : ['e2e', 'limit', 'filename', 'gate'])];
-// (e2e, limit, filename and gate slice real models; run them against local dev with the Docker slicer.)
+const tests = ['undo', 'angle', 'multi', 'preview', 'autosave', 'health', 'threemf', 'units', 'split', 'planecut', 'servo', 'supports', 'a11y', 'usb', 'usbcopy', 'arm', 'material', 'teacher', 'fixes', ...(live ? [] : ['e2e', 'limit', 'filename', 'gate', 'line'])];
+// (e2e, limit, filename, gate and line slice real models; run them against local dev with the Docker slicer.)
 let failed = 0;
 // Open slicing for the run with a fresh random phrase (the tests get it through the environment),
 // and always close it again at the end, also on the live site.
@@ -32,7 +32,7 @@ async function closeForGood() {
 }
 for (const t of tests) {
   const file = fileURLToPath(new URL(`./${t}.test.mjs`, import.meta.url));
-  const args = [file, base, ...(['teacher', 'fixes', 'limit', 'a11y', 'gate'].includes(t) ? [key] : [])];
+  const args = [file, base, ...(['teacher', 'fixes', 'limit', 'a11y', 'gate', 'line'].includes(t) ? [key] : [])];
   const r = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 600_000, env: process.env });
   const out = `${r.stdout}${r.stderr}`;
   const pass = (out.match(/^PASS/gm) || []).length;
