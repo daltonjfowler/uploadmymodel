@@ -43,7 +43,8 @@ const openEdges = () => page.evaluate(() => window.umm.viewer.models.map((m) => 
   return [...uses.values()].filter((n) => n !== 2).length;
 }).join(','));
 const pickSplit = async (value) => {
-  await page.selectOption('#toolPanel select.splitpick', value);
+  await page.click('.tool[data-tool="split"]'); // its own button on the left (2026-10-28)
+  await page.click(`#toolPanel button[data-split="${value}"]`);
   await page.waitForTimeout(400);
 };
 
@@ -53,7 +54,8 @@ await page.waitForTimeout(500);
 // 1. a 40 mm cube: Split → By a plane shows one plane
 await page.setInputFiles('#fileInput', stl('cube40.stl', [[0, 0, 0, 40, 40, 40]]));
 await page.waitForTimeout(800);
-check('split dropdown choices', await page.$$eval('#toolPanel select.splitpick option', (o) => o.map((x) => x.value).join(',')), ',parts,loose,plane');
+await page.click('.tool[data-tool="split"]');
+check('split choices', await page.$$eval('#toolPanel button[data-split]', (b) => b.map((x) => x.dataset.split).join(',')), 'parts,loose,plane');
 await pickSplit('plane');
 check('one plane row', await page.$$eval('#toolPanel .cutrow', (r) => r.length), 1);
 check('one plane drawn', await page.evaluate(() => window.umm.viewer.cutGroup.children.length), 1);

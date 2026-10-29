@@ -9,6 +9,7 @@ import { $, confirmDialog, el, esc, fmt } from './dom.js';
 import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.js';
 import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
 import { meshHealth } from './mesh-health.js';
+import { closeHolesIfBetter } from './mesh-repair.js';
 import { PLANE_DIRS } from './plane-cut.js';
 import { PrinterUsb, cardLines, sdName } from './printer-usb.js';
 import { clearPlate, loadPlate, savePlate } from './plate-store.js';
@@ -217,9 +218,25 @@ function checkHealth(model, { quiet = false } = {}) {
     if (quiet) return;
     toast(`"${model.name}" has holes or broken edges, so it may print with gaps. If the print looks wrong, fix the model or export it again.`, {
       kind: 'warn',
-      timeout: 12000,
+      timeout: 15000,
+      ...(openEdges ? { action: () => closeModelHoles(model), actionLabel: 'Close holes' } : {}),
     });
   }, { timeout: 3000 });
+}
+
+/** Fill the holes in an opened model (Dalton, 2026-10-28), one Undo step; it never makes things worse. */
+function closeModelHoles(model) {
+  if (!viewer.models.includes(model)) return;
+  const r = closeHolesIfBetter(viewer.modelMm(model));
+  if (!r.filled) {
+    toast(`Could not close the holes in "${model.name}". Fix it in the program it came from, or export it again.`, { kind: 'warn', timeout: 10000 });
+    return;
+  }
+  const made = viewer.replaceModel(model, r.positions, 'close holes');
+  if (!made) return;
+  const left = r.openAfter ? ' Some small gaps are still there.' : '';
+  toast(`Closed ${r.filled === 1 ? 'a hole' : `${r.filled} holes`} in "${made.name}".${left}`, { kind: r.openAfter ? 'warn' : 'info', timeout: 8000 });
+  checkHealth(made, { quiet: true });
 }
 
 // A model made in inches shows up 25.4 times too small, and one from Blender (meters) 1000 times
@@ -276,6 +293,7 @@ function setTool(name) {
   if (!viewer.selection.size && viewer.models.length === 1) viewer.select(viewer.models[0]);
   viewer.setGizmo(tool === 'rotate' ? 'rotate' : null);
   renderTools();
+  if (tool === 'servo' && !servo && viewer.selection.size === 1) startServo();
 }
 
 for (const b of document.querySelectorAll('.tool[data-tool]')) {
@@ -404,7 +422,7 @@ function renderTools() {
     return;
   }
   const title = el('div', { class: 'tp-title' });
-  title.innerHTML = `<strong>${esc({ move: 'Move', scale: 'Scale', rotate: 'Rotate', mirror: 'Mirror' }[tool])}</strong><span class="tp-model">${esc(m.name)}</span>`;
+  title.innerHTML = `<strong>${esc({ move: 'Move', scale: 'Scale', rotate: 'Rotate', mirror: 'Mirror', split: 'Split', servo: 'Servo (9 g)' }[tool])}</strong><span class="tp-model">${esc(m.name)}</span>`;
   p.append(title);
 
   if (tool === 'move') {
@@ -417,8 +435,24 @@ function renderTools() {
     p.append(grid);
     p.append(el('p', { class: 'note' }, 'Drag the model to move it. It always sits on the bed. 0, 0 is the middle.'));
     p.append(button('⊕ Center on the bed', () => viewer.setPosition(m, 0, 0), 'wide'));
-    p.append(splitPicker());
+  }
+
+  // Split and Servo have their own buttons on the left (Dalton, 2026-10-28), not a corner of Move.
+  if (tool === 'split') {
+    for (const [v, label, run] of [
+      ['parts', '✂ Separate parts <small>(space between them)</small>', () => splitSelected()],
+      ['loose', '✂ Every loose piece <small>(even touching)</small>', () => splitSelected({ loose: true })],
+      ['plane', '▤ By a plane… <small>(cut in two or more)</small>', () => startCut()],
+    ]) {
+      const b = button(label, run, 'wide');
+      b.dataset.split = v;
+      p.append(b);
+    }
+    p.append(el('p', { class: 'note' }, 'Separate parts pulls apart things with space between them. Every loose piece also splits shapes that touch. By a plane cuts through the model where you put the plane; each piece gets its cut face filled.'));
+  }
+  if (tool === 'servo') {
     p.append(button('⚙ Add a servo (9 g)…', () => startServo(), 'wide'));
+    p.append(el('p', { class: 'note' }, 'A pocket, a mount or a horn for the 9 g servo in Arduino kits. Or right-click the model right where it should go.'));
   }
 
   if (tool === 'scale') {
@@ -620,6 +654,8 @@ function startCut(axis = 'z', at = null, point = null) {
     servo = null;
     viewer.setGhost(null);
   }
+  tool = 'split';
+  viewer.setGizmo(null);
   cut = { model: m, planes: [] };
   addCutPlane(axis, at, point);
 }
@@ -673,7 +709,7 @@ async function applyCut() {
   } finally {
     busy(null);
   }
-  const { made, open, missed, triangles } = result;
+  const { made, open, missed, mended, triangles } = result;
   if (triangles) {
     // Checked before anything was cut: the plate is as it was.
     toast(`Cut, the plate would have too much detail to slice (${fmt(triangles)} triangles, the most is ${fmt(LIMITS.maxTriangles)}). Remove a model or use fewer planes.`, { kind: 'error', timeout: 10000 });
@@ -694,7 +730,8 @@ async function applyCut() {
   }
   for (const m of made) checkHealth(m, { quiet: true });
   const joined = missed ? ` ${missed === 1 ? 'One place' : `${missed} places`} the plane only partly covered stayed joined.` : '';
-  toast(`Cut into ${made.length} pieces. Each has its cut face filled, so it prints solid.${joined}${open ?' Part of the cut could not be closed (the model has holes there): check the pieces.' : ''}`, {
+  const gaps = mended ? ` ${mended === 1 ? 'A gap' : `${mended} gaps`} in the model ${mended === 1 ? 'was' : 'were'} closed too.` : '';
+  toast(`Cut into ${made.length} pieces. Each has its cut face filled, so it prints solid.${joined}${gaps}${open ?' Part of the cut could not be closed (the model has holes there): check the pieces.' : ''}`, {
     kind: open ? 'warn' : 'info',
     timeout: open ? 12000 : 6000,
     action: () => {
@@ -876,6 +913,23 @@ function aimServo() {
   return true;
 }
 
+/**
+ * The middle of that side missed (an L shape, a ring): the nearest spot on a 5 mm grid that hits the
+ * model instead, so a side button never just does nothing.
+ */
+function aimNearest() {
+  const b = viewer.worldBox(servo.model);
+  const reach = Math.max(b[3] - b[0], b[4] - b[1], b[5] - b[2]) / 2;
+  const spots = [];
+  for (let du = -reach; du <= reach; du += 5) for (let dv = -reach; dv <= reach; dv += 5) spots.push([du, dv]);
+  spots.sort((p, q) => Math.hypot(...p) - Math.hypot(...q));
+  for (const [du, dv] of spots) {
+    Object.assign(servo, { du: Math.round(du * 2) / 2, dv: Math.round(dv * 2) / 2 });
+    if (aimServo()) return true;
+  }
+  return false;
+}
+
 async function startServo(point = null, normal = null) {
   const m = viewer.selected;
   if (!m || viewer.selection.size !== 1) {
@@ -894,10 +948,12 @@ async function startServo(point = null, normal = null) {
     }
   }
   if (cut) endCut();
+  tool = 'servo';
+  viewer.setGizmo(null);
   const spot = point && normal ? { at: viewer.toModelMm(m, point), normal: normal.clone().normalize() } : null;
   servo = {
     model: m, tool, kind: servo?.kind ?? 'pocket', spin: servo?.spin ?? 0, fit: servo?.fit ?? 'normal',
-    horn: servo?.horn ?? 'double', arm: servo?.arm ?? 16, through: servo?.through ?? true,
+    horn: servo?.horn ?? 'double', arm: servo?.arm ?? 16, through: servo?.through ?? true, closeIn: servo?.closeIn ?? true,
     side: spot ? 'spot' : 'top', spot, du: 0, dv: 0, at: null, normal: null,
   };
   if (!aimServo()) { // e.g. a ring: nothing straight down through its middle
@@ -917,18 +973,43 @@ function endServo() {
 }
 
 /** The solids for the servo as it is set up now: { adds, cuts }. */
+/**
+ * Is the spot right for the cut? `thin`: the model is not as thick as the cut is deep (it would break
+ * through, or into a hollow); `hangs`: part of it is off the edge of the face. Raycasts, so it runs
+ * when a slider is let go, not on every step.
+ */
+function servoCheck() {
+  const m = servo.model;
+  const off = new Vector3(m.position.x, m.position.y, 0);
+  const clearance = csg.FITS[servo.fit];
+  const horn = servo.kind === 'horn';
+  const depth = viewer.depthAt(m, servo.at.clone().add(off), servo.normal);
+  const need = horn ? csg.hornDepth(clearance) + 2 : csg.servoDepth({ ...csg.SERVO_9G, clearance }) + 1;
+  const outline = csg.cutOutline(servo.at, servo.normal, servo.spin, { kind: servo.kind, horn: servo.horn, armLength: servo.horn === 'round' ? null : servo.arm, clearance });
+  const down = servo.normal.clone().negate();
+  const hangs = outline.some((p) => {
+    const hit = viewer.surfaceAt(m, p.clone().add(off).addScaledVector(servo.normal, 3), down);
+    return !hit || hit.distance > 4.5; // nothing under that point near the face: off the edge
+  });
+  return { depth, need, thin: servo.kind !== 'mount' && depth < need, hangs };
+}
+
 function servoSolids() {
   const { at, normal, kind, spin } = servo;
   const clearance = csg.FITS[servo.fit];
   const s = { ...csg.SERVO_9G, clearance };
+  // too thin or hollow there: walls round the cut first, so it stays closed in (Dalton, 2026-10-28)
+  const walls = servo.closeIn && servo.check?.thin;
   if (kind === 'horn') {
     // the middle hole just comes out of the far side (a hole 400 mm long would show past the bed)
     const m = servo.model;
     const depth = viewer.depthAt(m, at.clone().add(new Vector3(m.position.x, m.position.y, 0)), normal);
     const throughDepth = Number.isFinite(depth) ? depth + 2 : 400;
-    return { adds: [], cuts: csg.hornPocket(at, normal, spin, { kind: servo.horn, armLength: servo.horn === 'round' ? null : servo.arm, through: servo.through, throughDepth, clearance }) };
+    const horn = { kind: servo.horn, armLength: servo.horn === 'round' ? null : servo.arm, through: servo.through, throughDepth, clearance };
+    return { adds: walls ? [csg.hornSleeve(at, normal, spin, horn)] : [], cuts: csg.hornPocket(at, normal, spin, horn) };
   }
-  return kind === 'mount' ? csg.servoMount(at, normal, spin, s) : { adds: [], cuts: csg.servoPocket(at, normal, spin, s) };
+  if (kind === 'mount') return csg.servoMount(at, normal, spin, s);
+  return { adds: walls ? [csg.servoSleeve(at, normal, spin, s)] : [], cuts: csg.servoPocket(at, normal, spin, s) };
 }
 
 const SERVO_DONE = {
@@ -947,9 +1028,15 @@ async function applyServo() {
   const { model, kind } = servo;
   busy(SERVO_DONE[kind][0]);
   await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
-  let out;
+  let out, mended = 0;
+  servo.check = servoCheck();
+  const walled = servo.closeIn && servo.check.thin;
   try {
     out = csg.combine(viewer.modelMm(model), servoSolids());
+    // a cut can still leave gaps (a model that was never quite closed): fill them when that helps
+    const fixed = closeHolesIfBetter(out);
+    out = fixed.positions;
+    mended = fixed.filled;
   } catch (err) {
     console.error(err);
     toast('The servo could not be added here. Try another spot, or check the model (it may have holes).', { kind: 'error', timeout: 10000 });
@@ -967,7 +1054,8 @@ async function applyServo() {
   renderTools();
   const entry = viewer.undoStack.at(-1);
   checkHealth(made, { quiet: true });
-  toast(SERVO_DONE[kind][2], {
+  const extra = `${walled ? ' The model is thin there, so walls were added round it.' : ''}${mended ? ` ${mended === 1 ? 'A gap' : `${mended} gaps`} in the model ${mended === 1 ? 'was' : 'were'} closed.` : ''}`;
+  toast(SERVO_DONE[kind][2] + extra, {
     timeout: 8000,
     action: () => {
       if (viewer.undoStack.at(-1) === entry) undo();
@@ -1018,6 +1106,7 @@ function renderServoPanel(p, m) {
       };
       range.addEventListener('input', () => put(range.value));
       num.addEventListener('change', () => put(num.value));
+      for (const e of [range, num]) e.addEventListener('change', () => { showDepth(); showServoGhost(); });
       line.append(el('span', { class: 'sub-label' }, 'Arm length (middle of the horn to the tip)'), range, num, el('span', { class: 'unit' }, 'mm'));
       p.append(line);
     }
@@ -1053,7 +1142,7 @@ function renderServoPanel(p, m) {
     const b = button(label, () => {
       const was = { side: servo.side, du: servo.du, dv: servo.dv };
       Object.assign(servo, { side: k, du: 0, dv: 0 });
-      if (!aimServo()) {
+      if (!aimServo() && !aimNearest()) {
         Object.assign(servo, was);
         toast(`Nothing to put a servo on from the ${label.toLowerCase()} here. Right-click the model where it should go.`);
       }
@@ -1065,17 +1154,21 @@ function renderServoPanel(p, m) {
   p.append(sides);
 
   const depthNote = el('p');
+  const edgeNote = el('p', { class: 'advice warn' }, 'Part of it hangs over the edge here, so the cut would break out through the side. Slide it in, or spin it.');
   const showDepth = () => {
+    servo.check = servoCheck();
+    edgeNote.hidden = !servo.check.hangs;
     depthNote.hidden = servo.kind === 'mount';
     if (depthNote.hidden) return;
     const horn = servo.kind === 'horn';
-    const world = servo.at.clone().add(new Vector3(m.position.x, m.position.y, 0));
-    const depth = viewer.depthAt(m, world, servo.normal);
+    const { depth, need, thin } = servo.check;
     const clearance = csg.FITS[servo.fit];
-    const need = horn ? csg.hornDepth(clearance) + 2 : csg.servoDepth({ ...csg.SERVO_9G, clearance }) + 1;
     const thick = Number.isFinite(depth) ? `${fmt(depth, 1)} mm` : 'very';
-    const thin = depth < need;
-    depthNote.className = thin ? 'advice warn' : 'note';
+    depthNote.className = thin && !servo.closeIn ? 'advice warn' : 'note';
+    if (thin && servo.closeIn) {
+      depthNote.textContent = `Thin here (${thick}, the ${horn ? 'horn pocket' : 'pocket'} needs ${fmt(need, 0)} mm), so walls are added round it behind the surface. It stays closed in.`;
+      return;
+    }
     depthNote.textContent = horn
       ? (thin
         ? `Too thin here (${thick} thick, a horn pocket needs ${fmt(need, 0)} mm). Pick a thicker spot.`
@@ -1092,38 +1185,52 @@ function renderServoPanel(p, m) {
     const range = el('input', { type: 'range', min: -reach, max: reach, step: 0.5, 'aria-label': `Servo ${label.toLowerCase()}` });
     const num = el('input', { type: 'number', min: -reach, max: reach, step: 0.5, inputmode: 'decimal', 'aria-label': `Servo ${label.toLowerCase()}, number` });
     range.value = num.value = String(servo[key]);
-    const move = (raw) => {
+    const move = (raw, check = true) => {
       const was = servo[key];
       const v = Math.round(Math.min(reach, Math.max(-reach, Number(raw))) * 2) / 2;
       if (Number.isFinite(v)) servo[key] = v;
       if (!aimServo()) servo[key] = was; // slid off the model: stay at the last spot on it
       range.value = num.value = String(servo[key]);
+      if (check) showDepth(); // raycasts: when let go, not on every step (big models, slow laptops)
       showServoGhost();
-      showDepth();
     };
-    range.addEventListener('input', () => move(range.value));
+    range.addEventListener('input', () => move(range.value, false));
+    range.addEventListener('change', () => move(range.value));
     num.addEventListener('change', () => move(num.value));
     line.append(el('span', { class: 'sub-label' }, label), range, num, el('span', { class: 'unit' }, 'mm'));
     p.append(line);
   }
 
   const row = el('div', { class: 'cutctl' });
-  const range = el('input', { type: 'range', min: 0, max: 180, step: 5, 'aria-label': 'Servo spin' });
-  const num = el('input', { type: 'number', min: 0, max: 180, step: 5, inputmode: 'decimal', 'aria-label': 'Servo spin, number' });
+  const range = el('input', { type: 'range', min: 0, max: 355, step: 5, 'aria-label': 'Servo spin' });
+  const num = el('input', { type: 'number', min: 0, max: 355, step: 5, inputmode: 'decimal', 'aria-label': 'Servo spin, number' });
   range.value = num.value = String(servo.spin);
   const put = (raw) => {
-    const v = Math.round(Math.min(180, Math.max(0, Number(raw))));
+    const v = ((Math.round(Number(raw)) % 360) + 360) % 360; // all the way round: 370 is 10
     if (Number.isFinite(v)) servo.spin = v;
     range.value = num.value = String(servo.spin);
     showServoGhost();
   };
   range.addEventListener('input', () => put(range.value));
   num.addEventListener('change', () => put(num.value));
+  for (const e of [range, num]) e.addEventListener('change', () => { showDepth(); showServoGhost(); });
   row.append(el('span', { class: 'sub-label' }, 'Spin'), range, num, el('span', { class: 'unit' }, '°'));
   p.append(row);
 
+  if (servo.kind !== 'mount') {
+    const walls = el('label', { class: 'check' });
+    const tick = el('input', { type: 'checkbox' });
+    tick.checked = servo.closeIn;
+    tick.addEventListener('change', () => {
+      servo.closeIn = tick.checked;
+      showDepth();
+      showServoGhost();
+    });
+    walls.append(tick, document.createTextNode(' Close it in: add walls where it would break through (thin or hollow spots)'));
+    p.append(walls);
+  }
   showDepth();
-  p.append(depthNote);
+  p.append(depthNote, edgeNote);
   const go = el('div', { class: 'btn-row' });
   go.append(button({ pocket: '⚙ Cut pocket', mount: '⚙ Add mount', horn: '⚙ Cut horn pocket' }[servo.kind], applyServo, 'primary'), button('Cancel', endServo));
   p.append(go);
@@ -1843,6 +1950,8 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 's' || e.key === 'S') setTool('scale');
   else if (e.key === 'r' || e.key === 'R') setTool('rotate');
   else if (e.key === 'm' || e.key === 'M') setTool('mirror');
+  else if (e.key === 'p' || e.key === 'P') setTool('split');
+  else if (e.key === 'v' || e.key === 'V') setTool('servo');
   else if (e.key === 'f' || e.key === 'F') viewer.frameSelection();
 });
 

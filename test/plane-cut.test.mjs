@@ -84,10 +84,13 @@ test('a cut through a corner point and along faces still closes', () => {
   assert.equal(s.above.length, 0, 'nothing above the top');
 });
 
-test('an open model says its cut could not be closed everywhere', () => {
+test('an open model: the gap is closed after the cut, and the pieces are solid (Dalton, 2026-10-28)', () => {
   const p = box(0, 0, 0, 20).slice(9); // one triangle missing from the bottom
-  const { open } = cutByPlanes(new Float32Array(p), [{ axis: 'x', at: 10 }]);
-  assert.equal(open, true);
+  const { open, mended, pieces } = cutByPlanes(new Float32Array(p), [{ axis: 'x', at: 10 }]);
+  assert.equal(open, false);
+  assert.ok(mended >= 1, 'gap closed');
+  for (const pc of pieces) closed(pc.positions, `side ${pc.side}`);
+  near(pieces.reduce((n, pc) => n + volume(pc.positions), 0), 8000, 'total volume');
 });
 
 /** A closed n-sided prism (a "cylinder" as CAD exports it), axis Z, corners at angles 0, 360/n, ... */

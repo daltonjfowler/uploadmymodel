@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ADDITION, Brush, CDTTriangleSplitter, Evaluator, SUBTRACTION } from 'three-bvh-csg';
+import { meshHealth, weld } from './mesh-health.js';
 
 const evaluator = new Evaluator();
 evaluator.attributes = ['position'];
@@ -31,10 +32,86 @@ function soup(geometry) {
 
 /** `base` with every shape in `adds` joined on and every shape in `cuts` cut away. Closed in, closed out. */
 export function combine(base, { adds = [], cuts = [] } = {}) {
-  let b = brush(base);
+  let b = solidBrush(base);
   for (const a of adds) b = evaluator.evaluate(b, brush(a), ADDITION);
   for (const c of cuts) b = evaluator.evaluate(b, brush(c), SUBTRACTION);
   return watertight(soup(b.geometry));
+}
+
+/**
+ * The closed shells in a model: triangles join across an edge only when exactly two triangles use it,
+ * so shapes pushed into each other (sharing a corner or an edge) still come apart. Null unless there
+ * is more than one shell and every shell is closed (otherwise this is no help).
+ */
+export function closedShells(positions) {
+  const n = positions.length / 9;
+  const { id, unique } = weld(positions);
+  const edges = new Map();
+  for (let t = 0; t < n; t++) {
+    for (let e = 0; e < 3; e++) {
+      const a = id[t * 3 + e], b = id[t * 3 + ((e + 1) % 3)];
+      if (a === b) continue;
+      const k = a < b ? a * unique + b : b * unique + a;
+      const l = edges.get(k);
+      if (l) l.push(t);
+      else edges.set(k, [t]);
+    }
+  }
+  const parent = new Int32Array(n);
+  for (let i = 0; i < n; i++) parent[i] = i;
+  const find = (i) => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+    return i;
+  };
+  for (const l of edges.values()) if (l.length === 2) parent[find(l[0])] = find(l[1]);
+  const groups = new Map();
+  for (let t = 0; t < n; t++) {
+    const r = find(t);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(t);
+  }
+  if (groups.size < 2) return null;
+  const shells = [];
+  for (const tris of groups.values()) {
+    const out = new Float32Array(tris.length * 9);
+    tris.forEach((t, i) => out.set(positions.subarray(t * 9, t * 9 + 9), i * 9));
+    const h = meshHealth(out);
+    if (h.openEdges || h.badEdges) return null;
+    shells.push(out);
+  }
+  return shells;
+}
+
+/**
+ * One brush for a whole model. Shapes pushed into each other (Tinkercad exports them unmerged) would
+ * leave their inside faces in the cut and break it (Dalton's L-shaped part, 2026-10-28): so join the
+ * shells first. A shell facing inward (negative volume) is the inside wall of a hollow part: cut that
+ * one away instead of adding it, so the hollow stays.
+ */
+function solidBrush(positions) {
+  const shells = closedShells(positions);
+  if (!shells) return brush(positions);
+  const vol = (p) => {
+    let v = 0;
+    for (let i = 0; i < p.length; i += 9) {
+      v += p[i] * (p[i + 4] * p[i + 8] - p[i + 5] * p[i + 7]) - p[i + 1] * (p[i + 3] * p[i + 8] - p[i + 5] * p[i + 6]) + p[i + 2] * (p[i + 3] * p[i + 7] - p[i + 4] * p[i + 6]);
+    }
+    return v;
+  };
+  const solids = [], hollows = [];
+  for (const s of shells) {
+    if (vol(s) >= 0) solids.push(s);
+    else { // turn it right way out, to cut away
+      const f = s.slice();
+      for (let i = 0; i < f.length; i += 9) for (let k = 0; k < 3; k++) [f[i + 3 + k], f[i + 6 + k]] = [f[i + 6 + k], f[i + 3 + k]];
+      hollows.push(f);
+    }
+  }
+  if (!solids.length) return brush(positions);
+  let b = brush(solids[0]);
+  for (const s of solids.slice(1)) b = evaluator.evaluate(b, brush(s), ADDITION);
+  for (const h of hollows) b = evaluator.evaluate(b, brush(h), SUBTRACTION);
+  return b;
 }
 
 /**
@@ -365,6 +442,31 @@ export function servoMount(at, normal, spinDeg = 0, s = SERVO_9G, { wall = 2, fl
   return { adds: [solid(g, turn)], cuts: servoPocket(top, n, spinDeg, s), height };
 }
 
+/**
+ * Walls round a servo pocket, for a spot too thin or hollow for it (Dalton, 2026-10-28: "auto close
+ * the model if you cut through a wall"): a block from the surface down past the pocket's bottom,
+ * `wall` mm round it and `floor` mm under it. Joined on before the pocket is cut, it fills in where
+ * the model is solid anyway and gives the pocket its own walls where the model is thin or hollow.
+ */
+export function servoSleeve(at, normal, spinDeg = 0, s = SERVO_9G, { wall = 2, floor = 2 } = {}) {
+  const c = s.clearance;
+  const depth = servoDepth(s) + floor;
+  const [l, w] = [s.tabs[0] + 2 * c + 2 * wall, s.tabs[1] + 2 * c + 2 * wall];
+  return sleeve(at, normal, spinDeg, new THREE.BoxGeometry(l, depth - SKIN, w).translate(0, -SKIN - (depth - SKIN) / 2, 0));
+}
+
+// Walls start this far under the surface: a face lying exactly in the model's own surface trips up the
+// add (measured: 50 unpaired edges on a horn disc); the model's own skin covers the gap.
+const SKIN = 0.05;
+
+function sleeve(at, normal, spinDeg, g) {
+  const turn = new THREE.Matrix4()
+    .makeTranslation(at.x, at.y, at.z)
+    .multiply(turnFromY(normal.clone().normalize()))
+    .multiply(new THREE.Matrix4().makeRotationY((spinDeg * Math.PI) / 180));
+  return solid(g, turn);
+}
+
 // ---- servo horns ----------------------------------------------------------------------------------
 // Dalton, 2026-10-28: a pocket for the horn (the plastic arm that goes on the servo's gear), so a
 // printed part fixes onto the servo. Typical SG90 / MG90S kit horns; brands differ by a millimetre or
@@ -441,6 +543,43 @@ export function hornPocket(at, normal, spinDeg = 0, { kind = 'double', armLength
     .multiply(turnFromY(n))
     .multiply(new THREE.Matrix4().makeRotationY((spinDeg * Math.PI) / 180));
   return parts.map((g) => solid(g, turn));
+}
+
+/** Walls round a horn pocket (see servoSleeve): a disc as wide as the horn, down past its pilot holes. */
+export function hornSleeve(at, normal, spinDeg = 0, { kind = 'double', armLength = null, clearance = FITS.normal } = {}, h = HORN_9G, { wall = 2, floor = 1.5 } = {}) {
+  const reach = kind === 'round' ? h.round / 2 : (armLength ?? Math.max(...(h.arm[kind] ?? h.arm.double)));
+  const depth = h.thick + clearance + h.pilotDepth + floor;
+  const r = reach + clearance + wall;
+  const g = revolve([[0, -depth], [r, -depth], [r, -SKIN], [0, -SKIN]], 48);
+  return sleeve(at, normal, spinDeg, g);
+}
+
+/**
+ * Points round the outside of a servo, mount or horn cut, on the face, in the same frame as the cut:
+ * the page checks each one has the model under it, so a cut never hangs over an edge unseen.
+ */
+export function cutOutline(at, normal, spinDeg = 0, { kind = 'pocket', horn = 'double', armLength = null, clearance = FITS.normal } = {}, s = SERVO_9G, h = HORN_9G) {
+  let pts;
+  if (kind === 'horn' && horn === 'round') {
+    const r = h.round / 2 + clearance;
+    pts = Array.from({ length: 8 }, (_, i) => [r * Math.cos((i * Math.PI) / 4), r * Math.sin((i * Math.PI) / 4)]);
+  } else if (kind === 'horn') {
+    const arms = h.arm[horn] ?? h.arm.double;
+    const scale = armLength ? armLength / Math.max(...arms) : 1;
+    pts = arms.map((len, i) => {
+      const a = [0, Math.PI, Math.PI / 2, -Math.PI / 2][i];
+      return [(len * scale + clearance) * Math.cos(a), -(len * scale + clearance) * Math.sin(a)];
+    });
+  } else {
+    const wall = kind === 'mount' ? 2 : 0;
+    const [x, z] = [s.tabs[0] / 2 + clearance + wall, s.tabs[1] / 2 + clearance + wall];
+    pts = [[x, z], [x, -z], [-x, z], [-x, -z], [x, 0], [-x, 0]];
+  }
+  const turn = new THREE.Matrix4()
+    .makeTranslation(at.x, at.y, at.z)
+    .multiply(turnFromY(normal.clone().normalize()))
+    .multiply(new THREE.Matrix4().makeRotationY((spinDeg * Math.PI) / 180));
+  return pts.map(([x, z]) => new THREE.Vector3(x, 0, z).applyMatrix4(turn));
 }
 
 /** How deep a horn pocket goes before the middle hole: the plate, plus the arm pilots. */

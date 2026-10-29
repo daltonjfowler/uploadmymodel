@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Vector3 } from 'three';
-import { combine, connectorSpots, dowelPin, FITS, hole, HORN_9G, hornPocket, peg, servoDepth, servoMount, servoPocket, SERVO_9G } from '../web/src/csg-tools.js';
+import { combine, connectorSpots, dowelPin, FITS, hole, HORN_9G, hornPocket, hornSleeve, peg, servoDepth, servoMount, servoPocket, servoSleeve, SERVO_9G } from '../web/src/csg-tools.js';
 import { meshHealth } from '../web/src/mesh-health.js';
 
 function box(x, y, z, sx, sy = sx, sz = sx) {
@@ -138,4 +138,42 @@ test('horn pockets: every kind leaves a closed solid with a recess the horn sits
   const long = combine(block, { cuts: hornPocket(new Vector3(30, 30, 12), UP, 0, { kind: 'single', armLength: 22, through: false }) });
   const short = combine(block, { cuts: hornPocket(new Vector3(30, 30, 12), UP, 0, { kind: 'single', armLength: 12, through: false }) });
   assert.ok(volume(long) < volume(short), 'arm length changes the pocket');
+});
+
+test('walls round the pocket: a pocket in a 4 mm plate stays closed in (Dalton, 2026-10-28)', () => {
+  const plate = box(0, 0, 0, 60, 40, 4);
+  const at = new Vector3(30, 20, 4);
+  const open = combine(plate, { cuts: servoPocket(at, UP) });
+  closed(open, 'without walls');
+  const walled = combine(plate, { adds: [servoSleeve(at, UP)], cuts: servoPocket(at, UP) });
+  closed(walled, 'with walls');
+  let z0 = Infinity;
+  for (let i = 2; i < walled.length; i += 3) z0 = Math.min(z0, walled[i]);
+  near(z0, 4 - servoDepth() - 2, 1e-3, 'floor 2 mm under the pocket, behind the plate');
+  assert.ok(volume(walled) > volume(open) + 3000, 'walls and floor added');
+  const horn = combine(plate, { adds: [hornSleeve(at, UP, 0, { kind: 'cross' })], cuts: hornPocket(at, UP, 0, { kind: 'cross', throughDepth: 30 }) });
+  closed(horn, 'horn with walls');
+});
+
+test('shapes pushed into each other are joined before the cut, so it stays closed (Dalton\'s L part, 2026-10-28)', () => {
+  const L = new Float32Array([...box(0, 0, 40, 80, 20, 20), ...box(50, 0, 0, 30, 20, 60)]); // share an edge
+  assert.ok(meshHealth(L).badEdges > 0, 'the L itself has an edge used four times');
+  for (const spin of [0, 90, 33]) {
+    const out = combine(L, { cuts: hornPocket(new Vector3(65, 0, 50), new Vector3(0, -1, 0), spin, { kind: 'single', throughDepth: 22 }) });
+    closed(out, `horn at ${spin}°`);
+  }
+});
+
+test('a hollow box keeps its hollow when a pocket is cut into it', () => {
+  const outer = box(0, 0, 0, 60, 40, 40);
+  const inner = box(3, 3, 3, 54, 34, 34);
+  for (let i = 0; i < inner.length; i += 9) for (let k = 0; k < 3; k++) [inner[i + 3 + k], inner[i + 6 + k]] = [inner[i + 6 + k], inner[i + 3 + k]];
+  const hollow = new Float32Array([...outer, ...inner]);
+  const solidVolume = 60 * 40 * 40 - 54 * 34 * 34;
+  near(volume(hollow), solidVolume, 1, 'hollow box volume');
+  const at = new Vector3(30, 20, 40);
+  const out = combine(hollow, { adds: [servoSleeve(at, UP)], cuts: servoPocket(at, UP) });
+  closed(out, 'hollow box with a walled pocket');
+  const v = volume(out);
+  assert.ok(v > solidVolume && v < solidVolume + 8000, `still hollow, walls added: ${v.toFixed(0)} vs ${solidVolume}`);
 });

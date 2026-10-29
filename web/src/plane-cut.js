@@ -11,6 +11,7 @@
 
 import { ShapeUtils, Vector2 } from 'three';
 import { meshHealth } from './mesh-health.js';
+import { closeHolesIfBetter } from './mesh-repair.js';
 
 const AXES = { x: 0, y: 1, z: 2 };
 // The two other axes, in the order that makes "counter-clockwise" mean "facing +axis".
@@ -349,7 +350,7 @@ const unit = (a) => {
  * `join(below, above, plane, loops)`, when given, may change the two sides of each flat cut (connectors)
  * and return `{ below, above, extras }`; extras (loose dowel pins) come back in `extras`.
  * @returns {{ pieces: { positions: Float32Array, side: number[] }[], open: boolean, missed: number,
- *   extras: Float32Array[] }} `side` is -1, 0 or +1 per plane (which side of it the piece is on; 0 when
+ *   mended: number, extras: Float32Array[] }} `mended`: gaps closed in the pieces (mesh-repair.js) `side` is -1, 0 or +1 per plane (which side of it the piece is on; 0 when
  *   it is on both, joined where the plane did not reach), for moving the pieces apart
  */
 export function cutByPlanes(positions, planes, join = null) {
@@ -382,7 +383,18 @@ export function cutByPlanes(positions, planes, join = null) {
     const after = pieces.reduce((n, p) => n + meshHealth(p.positions).openEdges, 0);
     if (after > before) open = true;
   }
-  return { pieces, open, missed, extras };
+  // A piece with gaps (the model had holes, or the cut ran through a broken wall): close them where
+  // that helps (Dalton, 2026-10-28), then say "open" only if some are still there.
+  let mended = 0;
+  if (pieces.length > 1 && open) {
+    for (const p of pieces) {
+      const r = closeHolesIfBetter(p.positions);
+      p.positions = r.positions;
+      mended += r.filled;
+    }
+    open = pieces.some((p) => meshHealth(p.positions).openEdges > 0);
+  }
+  return { pieces, open, missed, mended, extras };
 }
 
 // ---- A cut plane on the bed (shared by the viewer and the panel) -----------------------------------

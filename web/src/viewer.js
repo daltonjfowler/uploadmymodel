@@ -816,7 +816,7 @@ export class Viewer extends EventTarget {
       const pl = new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(...f.n), new THREE.Vector3(...f.c)).applyMatrix4(toModel);
       return { normal: pl.normal.toArray(), at: -pl.constant, keep: keep || null };
     });
-    const { pieces, open, missed } = cutByPlanes(model.geometry.attributes.position.array, local);
+    const { pieces, open, missed, mended } = cutByPlanes(model.geometry.attributes.position.array, local);
     if (pieces.length < 2) return { made: [], open, missed };
     const GAP = 4; // mm between pieces, per cut
     const parts = pieces.map((pc) => {
@@ -841,7 +841,7 @@ export class Viewer extends EventTarget {
     // Filled cut faces add triangles: over the slicer's limit, cut nothing and say how many.
     const triangles = this.trianglesAfterSplit(model, parts);
     if (triangles > LIMITS.maxTriangles) return { made: [], open, missed, triangles };
-    return { made: this.splitModel(model, parts), open, missed };
+    return { made: this.splitModel(model, parts), open, missed, mended };
   }
 
   // ---- Servo pockets and mounts (csg-tools.js, main.js) ---------------------------------------
