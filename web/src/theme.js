@@ -9,9 +9,9 @@ const LABELS = { system: '🖥️ System', light: '☀️ Light', dark: '🌙 Da
 function load() {
   try {
     const v = localStorage.getItem(KEY);
-    return v === 'light' || v === 'dark' ? v : 'system';
+    return v === 'light' || v === 'system' ? v : 'dark'; // nothing saved: Dark (Dalton, 2026-10-28)
   } catch {
-    return 'system';
+    return 'dark';
   }
 }
 
@@ -31,8 +31,7 @@ export function initThemeButton(button) {
   button.addEventListener('click', () => {
     pref = ORDER[(ORDER.indexOf(pref) + 1) % ORDER.length];
     try {
-      if (pref === 'system') localStorage.removeItem(KEY);
-      else localStorage.setItem(KEY, pref);
+      localStorage.setItem(KEY, pref); // System too: no key at all now means Dark
     } catch { /* storage blocked: still works for this page */ }
     apply();
   });
