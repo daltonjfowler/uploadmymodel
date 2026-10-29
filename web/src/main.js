@@ -79,7 +79,7 @@ function clockTime(ms) {
 const viewer = new Viewer($('#viewport'), PRINTER);
 const panel = new SettingsPanel($('#settings'), $('#hint'));
 // Browser tests reach the 3D view through this; only with ?debug in the address.
-if (new URLSearchParams(location.search).has('debug')) window.umm = { viewer, panel };
+if (new URLSearchParams(location.search).has('debug')) window.umm = { viewer, panel, servoState: () => servo };
 
 let tool = 'move';
 let stage = 'prepare'; // 'prepare' (plate + settings) or 'preview' (G-code layers)
@@ -789,11 +789,14 @@ function cutMore(pl, i, diag) {
     return line;
   };
   const half = Math.round(diag / 2);
+  // A plane may be much bigger than the model (Dalton, 2026-10-28): up to 300 mm (past the 280 mm bed)
+  // or twice the model, whichever is more. The top of the slider is "whole" (no edge at all).
+  const biggest = Math.max(300, 2 * diag);
   box.append(
     ctl(`Tilt round ${U}`, { min: -80, max: 80, step: 1, unit: '°', get: () => pl.tiltU, set: (v) => { pl.tiltU = v; } }),
     ctl(`Tilt round ${V}`, { min: -80, max: 80, step: 1, unit: '°', get: () => pl.tiltV, set: (v) => { pl.tiltV = v; } }),
-    ctl(`Size along ${U}`, { min: 2, max: diag, step: 1, unit: 'mm', whole: true, get: () => pl.w, set: (v) => { pl.w = v; } }),
-    ctl(`Size along ${V}`, { min: 2, max: diag, step: 1, unit: 'mm', whole: true, get: () => pl.h, set: (v) => { pl.h = v; } }),
+    ctl(`Size along ${U}`, { min: 2, max: biggest, step: 1, unit: 'mm', whole: true, get: () => pl.w, set: (v) => { pl.w = v; } }),
+    ctl(`Size along ${V}`, { min: 2, max: biggest, step: 1, unit: 'mm', whole: true, get: () => pl.h, set: (v) => { pl.h = v; } }),
     ctl(`Slide along ${U}`, { min: -half, max: half, step: 0.5, unit: 'mm', get: () => pl.du, set: (v) => { pl.du = v; } }),
     ctl(`Slide along ${V}`, { min: -half, max: half, step: 0.5, unit: 'mm', get: () => pl.dv, set: (v) => { pl.dv = v; } }),
     button('Flat and whole again', () => {
@@ -830,20 +833,54 @@ function splitPicker() {
 let csg = null; // csg-tools.js, once loaded
 let servo = null; // { model, at, normal (model mm, bed frame), kind: 'pocket' | 'mount', spin } while placing one
 
+// Which side of the model the servo goes on (Dalton, 2026-10-28: not just the top), as the
+// direction it faces out. Front is -Y, the side nearest the "FRONT" on the floor.
+const SERVO_SIDES = {
+  top: ['Top', [0, 0, 1]],
+  bottom: ['Bottom', [0, 0, -1]],
+  front: ['Front', [0, -1, 0]],
+  back: ['Back', [0, 1, 0]],
+  left: ['Left', [-1, 0, 0]],
+  right: ['Right', [1, 0, 0]],
+};
+
+/** Two directions along a face that faces `n`: left-right first, then up-down (or front-back on top). */
+function faceDirs(n) {
+  if (Math.abs(n.z) > 0.9) return [new Vector3(1, 0, 0), new Vector3(0, 1, 0)];
+  const across = new Vector3(0, 0, 1).cross(n).normalize();
+  return [across, n.clone().cross(across).normalize()];
+}
+
+/**
+ * Where the servo sits for its side (or clicked spot) and slides: a ray from outside the model
+ * toward that side, moved du / dv mm along the face. Sets servo.at and servo.normal; false on a miss.
+ */
+function aimServo() {
+  const m = servo.model;
+  const b = viewer.worldBox(m);
+  let n, origin;
+  if (servo.side === 'spot') {
+    n = servo.spot.normal.clone();
+    origin = servo.spot.at.clone().add(new Vector3(m.position.x, m.position.y, 0)).addScaledVector(n, 2);
+  } else {
+    n = new Vector3(...SERVO_SIDES[servo.side][1]);
+    const far = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) + 20;
+    origin = new Vector3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2).addScaledVector(n, far);
+  }
+  const [a, c] = faceDirs(n);
+  origin.addScaledVector(a, servo.du).addScaledVector(c, servo.dv);
+  const hit = viewer.surfaceAt(m, origin, n.clone().negate());
+  if (!hit) return false;
+  servo.at = viewer.toModelMm(m, hit.point);
+  servo.normal = hit.normal.clone().normalize();
+  return true;
+}
+
 async function startServo(point = null, normal = null) {
   const m = viewer.selected;
   if (!m || viewer.selection.size !== 1) {
     toast('Click one model first, then add a servo to it.');
     return;
-  }
-  if (!point || !normal) { // no spot picked: the top of the model, straight down from above its middle
-    const b = viewer.worldBox(m);
-    const hit = viewer.surfaceAt(m, new Vector3((b[0] + b[3]) / 2, (b[1] + b[4]) / 2, b[5] + 20), new Vector3(0, 0, -1));
-    if (!hit) {
-      toast('Right-click the model where the servo should go.');
-      return;
-    }
-    ({ point, normal } = hit);
   }
   if (!csg) {
     busy('Loading…');
@@ -857,7 +894,17 @@ async function startServo(point = null, normal = null) {
     }
   }
   if (cut) endCut();
-  servo = { model: m, tool, at: viewer.toModelMm(m, point), normal: normal.clone().normalize(), kind: servo?.kind ?? 'pocket', spin: servo?.spin ?? 0 };
+  const spot = point && normal ? { at: viewer.toModelMm(m, point), normal: normal.clone().normalize() } : null;
+  servo = {
+    model: m, tool, kind: servo?.kind ?? 'pocket', spin: servo?.spin ?? 0,
+    side: spot ? 'spot' : 'top', spot, du: 0, dv: 0, at: null, normal: null,
+  };
+  if (!aimServo()) { // e.g. a ring: nothing straight down through its middle
+    servo = null;
+    toast('Right-click the model where the servo should go.');
+    renderTools();
+    return;
+  }
   renderTools();
 }
 
@@ -930,6 +977,62 @@ function renderServoPanel(p, m) {
   }
   p.append(kinds);
 
+  p.append(el('span', { class: 'sub-label' }, 'Side of the model'));
+  const sides = el('div', { class: 'servosides', role: 'group', 'aria-label': 'Side of the model' });
+  const choices = Object.entries(SERVO_SIDES).map(([k, [label]]) => [k, label]);
+  if (servo.spot) choices.push(['spot', 'Where I clicked']);
+  for (const [k, label] of choices) {
+    const b = button(label, () => {
+      const was = { side: servo.side, du: servo.du, dv: servo.dv };
+      Object.assign(servo, { side: k, du: 0, dv: 0 });
+      if (!aimServo()) {
+        Object.assign(servo, was);
+        toast(`Nothing to put a servo on from the ${label.toLowerCase()} here. Right-click the model where it should go.`);
+      }
+      renderTools();
+    }, servo.side === k ? 'on' : '');
+    b.setAttribute('aria-pressed', String(servo.side === k));
+    sides.append(b);
+  }
+  p.append(sides);
+
+  const depthNote = el('p');
+  const showDepth = () => {
+    depthNote.hidden = servo.kind !== 'pocket';
+    if (depthNote.hidden) return;
+    const world = servo.at.clone().add(new Vector3(m.position.x, m.position.y, 0));
+    const depth = viewer.depthAt(m, world, servo.normal);
+    const need = csg.servoDepth() + 1;
+    const thick = Number.isFinite(depth) ? `${fmt(depth, 1)} mm` : 'very';
+    const thin = depth < need;
+    depthNote.className = thin ? 'advice warn' : 'note';
+    depthNote.textContent = thin
+      ? `Too thin here (${thick} thick, a pocket needs ${fmt(need, 0)} mm): it would go right through. Pick a thicker spot, or use Mount.`
+      : `The model is ${thick} thick here; the pocket goes ${fmt(need - 1, 0)} mm in.`;
+  };
+  // slide along the face: re-aimed on every move, so it follows a curved or stepped side
+  const box = viewer.worldBox(m);
+  const reach = Math.ceil(Math.max(box[3] - box[0], box[4] - box[1], box[5] - box[2]) / 2);
+  for (const [key, label] of [['du', 'Slide ↔'], ['dv', 'Slide ↕']]) {
+    const line = el('div', { class: 'cutctl' });
+    const range = el('input', { type: 'range', min: -reach, max: reach, step: 0.5, 'aria-label': `Servo ${label.toLowerCase()}` });
+    const num = el('input', { type: 'number', min: -reach, max: reach, step: 0.5, inputmode: 'decimal', 'aria-label': `Servo ${label.toLowerCase()}, number` });
+    range.value = num.value = String(servo[key]);
+    const move = (raw) => {
+      const was = servo[key];
+      const v = Math.round(Math.min(reach, Math.max(-reach, Number(raw))) * 2) / 2;
+      if (Number.isFinite(v)) servo[key] = v;
+      if (!aimServo()) servo[key] = was; // slid off the model: stay at the last spot on it
+      range.value = num.value = String(servo[key]);
+      showServoGhost();
+      showDepth();
+    };
+    range.addEventListener('input', () => move(range.value));
+    num.addEventListener('change', () => move(num.value));
+    line.append(el('span', { class: 'sub-label' }, label), range, num, el('span', { class: 'unit' }, 'mm'));
+    p.append(line);
+  }
+
   const row = el('div', { class: 'cutctl' });
   const range = el('input', { type: 'range', min: 0, max: 180, step: 5, 'aria-label': 'Servo spin' });
   const num = el('input', { type: 'number', min: 0, max: 180, step: 5, inputmode: 'decimal', 'aria-label': 'Servo spin, number' });
@@ -945,19 +1048,12 @@ function renderServoPanel(p, m) {
   row.append(el('span', { class: 'sub-label' }, 'Spin'), range, num, el('span', { class: 'unit' }, '°'));
   p.append(row);
 
-  if (servo.kind === 'pocket') {
-    const world = servo.at.clone().add(new Vector3(m.position.x, m.position.y, 0));
-    const depth = viewer.depthAt(m, world, servo.normal);
-    const need = csg.servoDepth() + 1;
-    const thick = Number.isFinite(depth) ? `${fmt(depth, 1)} mm` : 'very';
-    p.append(depth < need
-      ? el('p', { class: 'advice warn' }, `Too thin here (${thick} thick, a pocket needs ${fmt(need, 0)} mm): it would go right through. Pick a thicker spot, or use Mount.`)
-      : el('p', { class: 'note' }, `The model is ${thick} thick here; the pocket goes ${fmt(need - 1, 0)} mm in.`));
-  }
+  showDepth();
+  p.append(depthNote);
   const go = el('div', { class: 'btn-row' });
   go.append(button(servo.kind === 'mount' ? '⚙ Add mount' : '⚙ Cut pocket', applyServo, 'primary'), button('Cancel', endServo));
   p.append(go);
-  p.append(el('p', { class: 'note' }, 'For the 9 g micro servo in Arduino kits (SG90 or MG90S). The see-through shape shows what is cut away. It pushes in by hand, two small screws hold it, and a slot lets the wire out. Right-click the model to move it to another spot.'));
+  p.append(el('p', { class: 'note' }, 'For the 9 g micro servo in Arduino kits (SG90 or MG90S). The see-through shape shows what is cut away. It pushes in by hand, two small screws hold it, and a slot lets the wire out. Pick a side (a flat cut face works well), slide it into place, or right-click the model to put it right where you click.'));
   showServoGhost();
 }
 

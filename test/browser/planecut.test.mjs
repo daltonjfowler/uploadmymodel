@@ -138,6 +138,9 @@ await page.click('#toolPanel button:has-text("✂ Cut")');
 await page.waitForTimeout(1000);
 check('too small: nothing cut', await models(), 1);
 check('too small: says why', await page.isVisible('text=covers all the way across'), true);
+await setCtl('size along x', 250); // much bigger than the model: cuts like a whole plane
+check('a 250 mm plane is allowed', await page.inputValue('#toolPanel input[aria-label="Plane 1 size along x, number"]'), '250');
+check('drawn 250 mm wide', await page.evaluate(() => Math.round(window.umm.viewer.cutGroup.children[0].geometry.parameters.width)), 250);
 await page.click('#toolPanel .cutmore button:has-text("Flat and whole again")');
 check('reset keeps tilt and size open', await page.isVisible('#toolPanel input[aria-label="Plane 1 tilt round x, number"]'), true);
 await setCtl('tilt round x', 30);

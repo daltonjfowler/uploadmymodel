@@ -435,8 +435,9 @@ export function planeFrame(pl, box) {
   const full = [u1 - u0 + 2 * M, v1 - v0 + 2 * M];
   let draw;
   if (half) {
-    const [w, h] = [Math.min(2 * half[0], full[0]), Math.min(2 * half[1], full[1])];
-    // an endless side is drawn as far as the model goes, centred on it that way
+    // drawn at its real size, also when bigger than the model; an endless side is drawn as far as
+    // the model goes, centred on it that way
+    const [w, h] = [pl.w == null ? full[0] : 2 * half[0], pl.h == null ? full[1] : 2 * half[1]];
     const ou = pl.w == null ? (u0 + u1) / 2 : 0, ov = pl.h == null ? (v0 + v1) / 2 : 0;
     draw = { c: [0, 1, 2].map((i) => c[i] + ou * u[i] + ov * v[i]), w, h };
   } else {

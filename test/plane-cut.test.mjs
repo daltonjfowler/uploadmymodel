@@ -213,3 +213,14 @@ test('planeFrame: tilt, slide and size, and which points it covers', () => {
   assert.equal(planeCovers(s, [[12, 8, 5], [10, 10, 5]]), false);
   assert.equal(planeCovers(flat, [[-100, 0, 5]]), true, 'a whole plane covers everything');
 });
+
+test('a plane much bigger than the model is drawn that big and cuts all of it (Dalton, 2026-10-28)', () => {
+  const box20 = [0, 0, 0, 20, 20, 20];
+  const big = planeFrame({ axis: 'z', at: 10, w: 200, h: 150 }, box20);
+  near(big.draw.w, 200, 'drawn width');
+  near(big.draw.h, 150, 'drawn height');
+  const keep = (pts) => planeCovers(big, pts);
+  const { pieces, missed } = cutByPlanes(new Float32Array(box(0, 0, 0, 20)), [{ axis: 'z', at: 10, keep }]);
+  assert.equal(pieces.length, 2);
+  assert.equal(missed, 0);
+});

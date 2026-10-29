@@ -532,5 +532,9 @@ ul.plain { margin: 0; padding-left: 20px; color: var(--muted); }
 .cutctl input[type="number"] { min-width: 0; }
 .cutctl .unit { color: var(--muted); font-size: .82rem; }
 .cutmore .wide { margin-top: 2px; }
+.servosides { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 2px 0 8px; }
+.servosides button { padding: 5px 4px; font-size: .85rem; }
+.servosides button:last-child:nth-child(7) { grid-column: 1 / -1; } /* "Where I clicked" */
+.servosides button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 650; }
 button.iconbtn { padding: 2px 8px; }
 select.splitpick { width: 100%; margin-top: 6px; }
