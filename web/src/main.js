@@ -1691,6 +1691,7 @@ syncSupportAngle();
 syncMaterialChip();
 
 $('#help').addEventListener('click', () => $('#helpDialog').showModal());
+$('#about').addEventListener('click', () => $('#aboutDialog').showModal()); // what the site is for (Dalton, 2026-10-28)
 $('#printerChip').addEventListener('click', () => $('#printerDialog').showModal());
 
 // Keyboard shortcuts, like Cura's. Ignored while typing in a box.

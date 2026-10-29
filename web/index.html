@@ -55,8 +55,9 @@
     </button>
     <span class="grow"></span>
     <button id="help" class="toplink" type="button">ⓘ How to print</button>
+    <button id="about" class="toplink" type="button">About</button>
     <a class="toplink" href="/teacher/" title="For teachers: which settings students may change">Teacher</a>
-    <button id="theme" class="themebtn" type="button">🖥️ System</button>
+    <button id="theme" class="themebtn" type="button">🌙 Dark</button>
   </header>
 
   <main id="stage" class="stage-area">
@@ -172,6 +173,15 @@
       </table>
       <p class="note">This site limits settings to reduce mistakes. It is not a safety system: your teacher checks every file and watches every print.</p>
       <p class="note">Your model stays on this Chromebook until you press Slice. Then it is sliced in a temporary folder and deleted, never saved on the server. Your plate is kept in this browser, so it comes back if the tab reloads. <a href="/legal" target="_blank" rel="noopener">Privacy &amp; legal</a></p>
+      <div class="dialog-actions"><button class="primary" value="close">Got it</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="aboutDialog" class="dialog">
+    <form method="dialog">
+      <h2>About uploadmymodel</h2>
+      <p>uploadmymodel is a 3D print slicer in Chrome. Open an STL, OBJ or 3MF model, set it on the bed, and slice it with your class's settings for the LulzBot TAZ Workhorse. Then save the G-code to the SD card and carry it to the printer. Nothing to install.</p>
+      <p class="note">Made by <a href="https://daltonjfowler.com" target="_blank" rel="noopener">Dalton Fowler</a>. <a href="/legal" target="_blank" rel="noopener">Privacy &amp; legal</a></p>
       <div class="dialog-actions"><button class="primary" value="close">Got it</button></div>
     </form>
   </dialog>
