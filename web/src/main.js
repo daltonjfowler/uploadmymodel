@@ -8,6 +8,7 @@ import { $, confirmDialog, el, esc, fmt } from './dom.js';
 import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.js';
 import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
 import { meshHealth } from './mesh-health.js';
+import { PLANE_DIRS } from './plane-cut.js';
 import { PrinterUsb, cardLines, sdName } from './printer-usb.js';
 import { clearPlate, loadPlate, savePlate } from './plate-store.js';
 import { SettingsPanel } from './settings-panel.js';
@@ -594,21 +595,35 @@ async function splitSelected({ loose = false } = {}) {
 // Dalton, 2026-10-09: big prints in parts. Add flat cut planes (X, Y, Z), see them on the model, then
 // Cut: each piece gets its cut face filled (plane-cut.js) so it prints solid. Planes are in bed mm.
 
-let cut = null; // { model, planes: [{ axis, at }] } while a split by plane is being set up
+let cut = null; // { model, planes: [{ axis, at, tiltU, tiltV, du, dv, w, h }] } while a split by plane is being set up
 const AXIS_K = { x: 0, y: 1, z: 2 };
 const AXIS_LABEL = { x: 'X (left | right)', y: 'Y (front | back)', z: 'Z (flat)' };
 
-function startCut(axis = 'z', at = null) {
+function startCut(axis = 'z', at = null, point = null) {
   const m = viewer.selected;
   if (!m || viewer.selection.size !== 1) {
     toast('Click one model first, then split it by plane.');
     return;
   }
   cut = { model: m, planes: [] };
-  addCutPlane(axis, at);
+  addCutPlane(axis, at, point);
 }
 
-function addCutPlane(axis = null, at = null) {
+/** A plane flat across `axis`, whole, through the model's middle (or through `point`, bed mm). */
+function newPlane(axis, at, point = null) {
+  const b = viewer.worldBox(cut.model);
+  const k = AXIS_K[axis];
+  const mid = (b[k] + b[k + 3]) / 2;
+  const pl = { axis, at: Math.round((at ?? mid) * 10) / 10, tiltU: 0, tiltV: 0, du: 0, dv: 0, w: null, h: null };
+  if (point) { // made smaller later, the plane stays centred where the student clicked
+    const [U, V] = PLANE_DIRS[axis];
+    pl.du = Math.round((point[U] - (b[AXIS_K[U]] + b[AXIS_K[U] + 3]) / 2) * 10) / 10;
+    pl.dv = Math.round((point[V] - (b[AXIS_K[V]] + b[AXIS_K[V] + 3]) / 2) * 10) / 10;
+  }
+  return pl;
+}
+
+function addCutPlane(axis = null, at = null, point = null) {
   if (!cut) return;
   if (cut.planes.length >= 6) {
     toast('Six planes is the most for one cut.');
@@ -616,10 +631,7 @@ function addCutPlane(axis = null, at = null) {
   }
   const used = new Set(cut.planes.map((p) => p.axis));
   axis ??= ['z', 'x', 'y'].find((a) => !used.has(a)) ?? 'z';
-  const b = viewer.worldBox(cut.model);
-  const k = AXIS_K[axis];
-  const mid = (b[k] + b[k + 3]) / 2;
-  cut.planes.push({ axis, at: Math.round((at ?? mid) * 10) / 10 });
+  cut.planes.push(newPlane(axis, at, point));
   showCut();
 }
 
@@ -646,14 +658,16 @@ async function applyCut() {
   } finally {
     busy(null);
   }
-  const { made, open, triangles } = result;
+  const { made, open, missed, triangles } = result;
   if (triangles) {
     // Checked before anything was cut: the plate is as it was.
     toast(`Cut, the plate would have too much detail to slice (${fmt(triangles)} triangles, the most is ${fmt(LIMITS.maxTriangles)}). Remove a model or use fewer planes.`, { kind: 'error', timeout: 10000 });
     return;
   }
   if (!made.length) {
-    toast('The planes miss the model, so nothing was cut. Slide a plane onto the model.', { timeout: 8000 });
+    toast(missed
+      ? 'Nothing was cut: a plane only cuts a part it covers all the way across. Make the plane bigger (Tilt and size) so its edge goes round the whole part.'
+      : 'The planes miss the model, so nothing was cut. Slide a plane onto the model.', { timeout: 10000 });
     return;
   }
   endCut();
@@ -664,7 +678,8 @@ async function applyCut() {
     return;
   }
   for (const m of made) checkHealth(m, { quiet: true });
-  toast(`Cut into ${made.length} pieces. Each has its cut face filled, so it prints solid.${open ? ' Part of the cut could not be closed (the model has holes there): check the pieces.' : ''}`, {
+  const joined = missed ? ` ${missed === 1 ? 'One place' : `${missed} places`} the plane only partly covered stayed joined.` : '';
+  toast(`Cut into ${made.length} pieces. Each has its cut face filled, so it prints solid.${joined}${open ?' Part of the cut could not be closed (the model has holes there): check the pieces.' : ''}`, {
     kind: open ? 'warn' : 'info',
     timeout: open ? 12000 : 6000,
     action: () => {
@@ -681,6 +696,8 @@ function renderCutPanel(p, m) {
   title.innerHTML = `<strong>Split by plane</strong><span class="tp-model">${esc(m.name)}</span>`;
   p.append(title);
   const b = viewer.worldBox(m);
+  // big enough for any tilt: sizes up to this are "whole", slides go half of it each way
+  const diag = Math.ceil(Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) + 12);
   cut.planes.forEach((pl, i) => {
     const k = AXIS_K[pl.axis];
     const [lo, hi] = [b[k], b[k + 3]];
@@ -688,9 +705,7 @@ function renderCutPanel(p, m) {
     const axis = el('select', { 'aria-label': `Plane ${i + 1} direction` });
     for (const a of ['x', 'y', 'z']) axis.append(new Option(AXIS_LABEL[a], a, false, a === pl.axis));
     axis.addEventListener('change', () => {
-      const kk = AXIS_K[axis.value];
-      pl.axis = axis.value;
-      pl.at = Math.round(((b[kk] + b[kk + 3]) / 2) * 10) / 10;
+      Object.assign(pl, newPlane(axis.value, null), { more: pl.more });
       showCut();
     });
     const num = el('input', { type: 'number', step: 0.5, inputmode: 'decimal', 'aria-label': `Plane ${i + 1} position in mm` });
@@ -714,14 +729,64 @@ function renderCutPanel(p, m) {
       else endCut();
     }, 'iconbtn');
     rm.title = 'Remove this plane';
-    row.append(axis, num, el('span', { class: 'unit' }, 'mm'), rm, range);
+    row.append(axis, num, el('span', { class: 'unit' }, 'mm'), rm, range, cutMore(pl, i, diag));
     p.append(row);
   });
   p.append(button('＋ Add a plane', () => addCutPlane(), 'wide'));
   const go = el('div', { class: 'btn-row' });
   go.append(button('✂ Cut', applyCut, 'primary'), button('Cancel', endCut));
   p.append(go);
-  p.append(el('p', { class: 'note' }, 'X cuts left from right, Y front from back, Z is a flat cut at a height above the bed. Every piece gets its cut face filled, so it prints solid; glue them after. Right-click the model to add a plane right where you click.'));
+  p.append(el('p', { class: 'note' }, 'X cuts left from right, Y front from back, Z is a flat cut at a height above the bed. Every piece gets its cut face filled, so it prints solid; glue them after. Right-click the model to add a plane right where you click. Under Tilt and size, a plane can lean, and a smaller plane cuts only the parts it covers all the way across (an arm, an ear), not the rest.'));
+}
+
+/**
+ * "Tilt and size" for one plane (Dalton's coworker, 2026-10-28): lean it round its two directions, make
+ * it smaller so it cuts only what it covers, and slide it along itself. Sliders plus number boxes.
+ */
+function cutMore(pl, i, diag) {
+  const [U, V] = PLANE_DIRS[pl.axis].map((a) => a.toUpperCase());
+  const box = el('details', { class: 'cutmore' });
+  box.open = Boolean(pl.more);
+  box.addEventListener('toggle', () => { pl.more = box.open; });
+  box.append(el('summary', {}, 'Tilt and size'));
+  const ctl = (label, { min, max, step, unit, get, set, whole = false }) => {
+    const name = `Plane ${i + 1} ${label.toLowerCase()}`;
+    const range = el('input', { type: 'range', min, max, step, 'aria-label': name });
+    const num = el('input', { type: 'number', min, max, step, inputmode: 'decimal', 'aria-label': `${name}, number` });
+    const tag = el('span', { class: 'unit' });
+    const show = () => {
+      const v = get() ?? max;
+      range.value = String(v);
+      num.value = String(v);
+      tag.textContent = whole && get() == null ? `${unit} (whole)` : unit;
+    };
+    const put = (raw) => {
+      const v = Math.round(Math.min(max, Math.max(min, Number(raw))) * 10) / 10;
+      if (Number.isFinite(v)) set(whole && v >= max ? null : v);
+      show();
+      viewer.setCutPlanes(cut.model, cut.planes);
+    };
+    range.addEventListener('input', () => put(range.value));
+    num.addEventListener('change', () => put(num.value));
+    show();
+    const line = el('div', { class: 'cutctl' });
+    line.append(el('span', { class: 'sub-label' }, label), range, num, tag);
+    return line;
+  };
+  const half = Math.round(diag / 2);
+  box.append(
+    ctl(`Tilt round ${U}`, { min: -80, max: 80, step: 1, unit: '°', get: () => pl.tiltU, set: (v) => { pl.tiltU = v; } }),
+    ctl(`Tilt round ${V}`, { min: -80, max: 80, step: 1, unit: '°', get: () => pl.tiltV, set: (v) => { pl.tiltV = v; } }),
+    ctl(`Size along ${U}`, { min: 2, max: diag, step: 1, unit: 'mm', whole: true, get: () => pl.w, set: (v) => { pl.w = v; } }),
+    ctl(`Size along ${V}`, { min: 2, max: diag, step: 1, unit: 'mm', whole: true, get: () => pl.h, set: (v) => { pl.h = v; } }),
+    ctl(`Slide along ${U}`, { min: -half, max: half, step: 0.5, unit: 'mm', get: () => pl.du, set: (v) => { pl.du = v; } }),
+    ctl(`Slide along ${V}`, { min: -half, max: half, step: 0.5, unit: 'mm', get: () => pl.dv, set: (v) => { pl.dv = v; } }),
+    button('Flat and whole again', () => {
+      Object.assign(pl, { tiltU: 0, tiltV: 0, du: 0, dv: 0, w: null, h: null });
+      showCut();
+    }, 'wide'),
+  );
+  return box;
 }
 
 /** The split choices, as one dropdown (Dalton 2026-10-09). */
@@ -758,14 +823,14 @@ function openMenu({ model, point, x, y }) {
   const items = model
     ? [
       ...(here ? [
-        ['＋', 'Cut plane here: flat (Z)', () => addCutPlane('z', point.z)],
-        ['＋', 'Cut plane here: left | right (X)', () => addCutPlane('x', point.x)],
-        ['＋', 'Cut plane here: front | back (Y)', () => addCutPlane('y', point.y)],
+        ['＋', 'Cut plane here: flat (Z)', () => addCutPlane('z', point.z, point)],
+        ['＋', 'Cut plane here: left | right (X)', () => addCutPlane('x', point.x, point)],
+        ['＋', 'Cut plane here: front | back (Y)', () => addCutPlane('y', point.y, point)],
         null,
       ] : []),
       ['✂', count > 1 ? 'Split each into separate objects' : 'Split into separate objects', () => splitSelected()],
       ['✂', 'Split every loose piece', () => splitSelected({ loose: true })],
-      ...(count === 1 && !cut ? [['▤', 'Split by plane…', () => startCut('z', point?.z ?? null)]] : []),
+      ...(count === 1 && !cut ? [['▤', 'Split by plane…', () => startCut('z', point?.z ?? null, point ?? null)]] : []),
       null,
       ['⧉', 'Copy', duplicateSelected, 'Ctrl+D'],
       ['⬇', count > 1 ? 'Lay each one flat' : 'Biggest flat side down', () => viewer.forSelected('lay flat', (m) => viewer.layFlatAuto(m))],
@@ -953,7 +1018,7 @@ function renderAction() {
       }
       const s = Math.round((Date.now() - (slice.slicingSince ?? slice.startedAt)) / 1000);
       const usesSupport = panel.value.support !== 'none';
-      status.textContent = `Slicing… ${s} s.${s >= 8 && usesSupport ? ' Supports take the longest, up to a minute or two.' : ''}`;
+      status.textContent = `Slicing… ${s} s.${s >= 120 ? ' A big plate can take up to 8 minutes. Keep this tab open.' : s >= 8 && usesSupport ? ' Supports take the longest, up to a minute or two.' : ''}`;
     };
     tick();
     clearInterval(slice.timer);

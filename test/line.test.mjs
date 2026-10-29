@@ -140,7 +140,7 @@ test('Cancel gives the place up at once', async () => {
 });
 
 test('a slice that never finished frees its slot after the lease, even if the page still asks', async () => {
-  assert.equal(LEASE_MS, 210_000); // container/server.py SLICE_BUDGET_S (180 s) + 30 s
+  assert.equal(LEASE_MS, 510_000); // container/server.py SLICE_BUDGET_S (480 s) + 30 s
   const line = new SliceLine(1);
   await line.enter('aaaaaaaa', 0);
   const b = line.enter('bbbbbbbb', 0);

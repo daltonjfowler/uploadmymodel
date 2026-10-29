@@ -103,5 +103,49 @@ check('separate parts keeps overlapping boxes together', await models(), 1);
 await pickSplit('loose');
 check('every loose piece splits them', await models(), 2);
 
+// 6. Tilt and size (Dalton's coworker, 2026-10-28): two towers in one file, 40 mm apart
+await page.evaluate(() => { window.umm.viewer.selectAll(); window.umm.viewer.removeSelected(); });
+await page.setInputFiles('#fileInput', stl('towers.stl', [[0, 0, 0, 20, 20, 40], [40, 0, 0, 20, 20, 40]]));
+await page.waitForTimeout(800);
+const setCtl = async (label, value) => {
+  const box = page.locator(`#toolPanel input[aria-label="Plane 1 ${label}, number"]`);
+  await box.fill(String(value));
+  await box.press('Tab');
+  await page.waitForTimeout(150);
+};
+await pickSplit('plane');
+await page.click('#toolPanel .cutmore summary');
+check('tilt and size opens', await page.isVisible('#toolPanel input[aria-label="Plane 1 size along x, number"]'), true);
+check('size starts whole', await page.textContent('#toolPanel .cutctl:nth-of-type(3) .unit'), 'mm (whole)');
+await setCtl('size along x', 30);
+await setCtl('slide along x', -20); // over the left tower only
+check('smaller plane drawn with an edge', await page.evaluate(() => window.umm.viewer.cutGroup.children[0].children.length), 1);
+await page.screenshot({ path: OUT + 'planecut-small.png' });
+await page.click('#toolPanel button:has-text("✂ Cut")');
+await page.waitForTimeout(1200);
+check('small plane: left tower in two, right tower whole', await models(), 3);
+check('small plane: every piece closed', await openEdges(), '0,0,0');
+await page.keyboard.press('Control+z');
+await page.waitForTimeout(500);
+check('undo puts the towers back', await models(), 1);
+
+await page.evaluate(() => window.umm.viewer.select(window.umm.viewer.models[0]));
+await page.waitForTimeout(200);
+await pickSplit('plane');
+await page.click('#toolPanel .cutmore summary');
+await setCtl('size along x', 10); // too small for either tower: nothing is cut
+await page.click('#toolPanel button:has-text("✂ Cut")');
+await page.waitForTimeout(1000);
+check('too small: nothing cut', await models(), 1);
+check('too small: says why', await page.isVisible('text=covers all the way across'), true);
+await page.click('#toolPanel .cutmore button:has-text("Flat and whole again")');
+check('reset keeps tilt and size open', await page.isVisible('#toolPanel input[aria-label="Plane 1 tilt round x, number"]'), true);
+await setCtl('tilt round x', 30);
+await page.screenshot({ path: OUT + 'planecut-tilted.png' });
+await page.click('#toolPanel button:has-text("✂ Cut")');
+await page.waitForTimeout(1200);
+check('tilted plane: both towers cut', await models(), 2);
+check('tilted plane: every piece closed', await openEdges(), '0,0');
+
 check('no page errors', errors.join(' | '), '');
 await browser.close();

@@ -1,7 +1,8 @@
 // Split by plane (web/src/plane-cut.js): every piece must be a closed solid, so it slices.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { cutByPlanes, cutMesh } from '../web/src/plane-cut.js';
+import { ShapeUtils, Vector2 } from 'three';
+import { cutByPlanes, cutMesh, cutTilted, planeCovers, planeFrame } from '../web/src/plane-cut.js';
 import { meshHealth } from '../web/src/mesh-health.js';
 
 function box(x, y, z, sx, sy = sx, sz = sx) {
@@ -127,4 +128,88 @@ test('a cut through a ring of the model\'s own corners still fills the cut face 
 test('the cut never claims to be closed when a piece is still open', () => {
   const { open } = cutByPlanes(prism(20, 10, 15), [{ axis: 'x', at: 0 }]);
   assert.equal(open, false);
+});
+
+// ---- Tilted and smaller planes (Dalton's coworker, 2026-10-28) ----------------------------------------
+
+/** A flat outline (counter-clockwise, [x, y] corners) pulled up from z = 0 to `h`: one closed mesh. */
+function extrude(outline, h) {
+  const out = [];
+  const n = outline.length;
+  for (let i = 0; i < n; i++) {
+    const [ax, ay] = outline[i], [bx, by] = outline[(i + 1) % n];
+    out.push(ax, ay, 0, bx, by, 0, bx, by, h, ax, ay, 0, bx, by, h, ax, ay, h);
+  }
+  for (const [i, j, k] of ShapeUtils.triangulateShape(outline.map(([x, y]) => new Vector2(x, y)), [])) {
+    const [a, b, c] = [outline[i], outline[j], outline[k]];
+    out.push(...a, h, ...b, h, ...c, h); // top, facing up
+    out.push(...a, 0, ...c, 0, ...b, 0); // bottom, facing down
+  }
+  return new Float32Array(out);
+}
+const U = [[0, 0], [30, 0], [30, 30], [20, 30], [20, 10], [10, 10], [10, 30], [0, 30]]; // a U, arms up +Y
+
+test('a tilted plane cuts a box into two closed pieces', () => {
+  const n = [Math.SQRT1_2, 0, Math.SQRT1_2];
+  const r = cutTilted(new Float32Array(box(0, 0, 0, 20)), n, (10 + 10) * Math.SQRT1_2); // through the middle
+  closed(r.below, 'below');
+  closed(r.above, 'above');
+  near(volume(r.below), 4000, 'below half');
+  near(volume(r.above), 4000, 'above half');
+  const { pieces, open } = cutByPlanes(new Float32Array(box(0, 0, 0, 20)), [{ normal: n, at: 5 * Math.SQRT1_2 }]);
+  assert.equal(pieces.length, 2);
+  assert.equal(open, false);
+  near(volume(pieces[0].positions), 5 * 5 / 2 * 20, 'small corner wedge'); // x + z < 5
+});
+
+test('a smaller plane cuts only the arm it covers; the rest stays one piece', () => {
+  const u = extrude(U, 10);
+  closed(u, 'the U itself');
+  // y = 20 crosses both arms; the plane covers only the left arm (x < 15)
+  const keep = (pts) => pts.every((p) => p[0] < 15);
+  const r = cutMesh(u, 'y', 20, keep);
+  assert.equal(r.missed, 1);
+  assert.equal(r.below.length, 0, 'nothing is only below: the base joins the right arm');
+  assert.equal(r.mixed.length, 1);
+  closed(r.mixed[0], 'U with the left arm tip off');
+  closed(r.above, 'left arm tip');
+  near(volume(r.above), 1000, 'left arm tip volume');
+  near(volume(r.mixed[0]), 6000, 'the rest');
+  const { pieces } = cutByPlanes(u, [{ axis: 'y', at: 20, keep }]);
+  assert.deepEqual(pieces.map((p) => p.side.join()).sort(), ['0', '1']);
+});
+
+test('a plane that covers no cut face whole leaves the model as it was', () => {
+  const b = new Float32Array(box(0, 0, 0, 20));
+  const { pieces, missed } = cutByPlanes(b, [{ axis: 'z', at: 10, keep: () => false }]);
+  assert.equal(pieces.length, 1);
+  assert.equal(missed, 1);
+  assert.deepEqual([...pieces[0].positions], [...b], 'triangles untouched');
+});
+
+test('covering one wall of a tube does not cut a slit in it', () => {
+  // x = 10 crosses the tube's two walls (y 0-5 and y 15-20); the plane covers only the first
+  const r = cutMesh(tube(), 'x', 10, (pts) => pts.every((p) => p[1] < 10));
+  assert.equal(r.mixed.length, 1);
+  assert.equal(r.below.length + r.above.length, 0);
+  closed(r.mixed[0], 'tube');
+  near(volume(r.mixed[0]), 300 * 30, 'tube volume');
+});
+
+test('planeFrame: tilt, slide and size, and which points it covers', () => {
+  const box20 = [0, 0, 0, 20, 20, 20];
+  const flat = planeFrame({ axis: 'z', at: 5 }, box20);
+  assert.deepEqual(flat.n, [0, 0, 1]);
+  assert.deepEqual(flat.c, [10, 10, 5]);
+  assert.equal(flat.half, null);
+  assert.equal(flat.tilted, false);
+  near(flat.draw.w, 32, 'drawn 6 mm past the model');
+  const t = planeFrame({ axis: 'z', at: 5, tiltU: 90 }, box20); // round X: now upright, facing -Y
+  near(t.n[1], -1, 'normal');
+  near(Math.abs(t.n[2]), 0, 'normal z');
+  const s = planeFrame({ axis: 'z', at: 5, du: 4, w: 6, h: 6 }, box20);
+  assert.deepEqual(s.c, [14, 10, 5]);
+  assert.equal(planeCovers(s, [[12, 8, 5], [16.9, 12.9, 5]]), true);
+  assert.equal(planeCovers(s, [[12, 8, 5], [10, 10, 5]]), false);
+  assert.equal(planeCovers(flat, [[-100, 0, 5]]), true, 'a whole plane covers everything');
 });

@@ -50,18 +50,20 @@ class Budget(unittest.TestCase):
         self.assertEqual(e.timeouts, [server.SLICE_BUDGET_S])
 
     def test_retries_share_what_is_left(self):
+        B = server.SLICE_BUDGET_S
         e = FakeEngine([100, 20], [139, 0])
         _, _, attempt = server.slice_plate(STL, "standard", {}, {})
         self.assertEqual(attempt, 2)
-        self.assertEqual(e.timeouts, [180, 80])
+        self.assertEqual(e.timeouts, [B, B - 100])
 
     def test_no_new_attempt_without_time_for_it(self):
-        e = FakeEngine([100, 75, 1], [139, 139, 0])
+        B = server.SLICE_BUDGET_S
+        e = FakeEngine([100, B - 105, 1], [139, 139, 0])
         with self.assertRaises(server.Refused) as caught:
             server.slice_plate(STL, "standard", {}, {})
         self.assertEqual(caught.exception.status, 500)
         self.assertIn("took too long", str(caught.exception))
-        self.assertEqual(e.timeouts, [180, 80])  # 5 s left: the third attempt never starts
+        self.assertEqual(e.timeouts, [B, B - 100])  # 5 s left: the third attempt never starts
         self.assertLessEqual(e.now - 1000.0, server.SLICE_BUDGET_S)
 
     def test_an_engine_that_runs_out_the_clock_is_stopped(self):
@@ -69,7 +71,7 @@ class Budget(unittest.TestCase):
         with self.assertRaises(server.Refused) as caught:
             server.slice_plate(STL, "standard", {}, {})
         self.assertIn("took too long", str(caught.exception))
-        self.assertEqual(e.timeouts, [180])
+        self.assertEqual(e.timeouts, [server.SLICE_BUDGET_S])
 
     def test_every_attempt_failing_is_an_engine_failure(self):
         FakeEngine([10, 10, 10], [139, 139, 139])

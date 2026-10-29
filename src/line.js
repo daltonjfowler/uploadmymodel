@@ -23,8 +23,8 @@
 export const TICKET_PATTERN = /^[A-Za-z0-9-]{8,64}$/;
 export const STALE_MS = 20_000;
 export const FRESH_MS = 8_000;
-// container/server.py SLICE_BUDGET_S (180 s for all tries together) + 30 s.
-export const LEASE_MS = 210_000;
+// container/server.py SLICE_BUDGET_S (480 s for all tries together) + 30 s.
+export const LEASE_MS = 510_000;
 // A class is 20-30 students; more than this waiting is a runaway page, not a class.
 export const MAX_WAITING = 80;
 // Guess for how long one slice takes, until the line has timed a few (a supported model at

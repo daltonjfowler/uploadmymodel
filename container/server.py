@@ -40,7 +40,7 @@ ATTEMPTS = 3
 # All attempts of one slice together, so a slice holds the lock (and its place in the Worker's line)
 # for at most this long. A supported Benchy takes ~15 s live. src/line.js LEASE_MS is this + 30 s:
 # change both together.
-SLICE_BUDGET_S = 180
+SLICE_BUDGET_S = 480  # 8 min: Dalton 2026-10-28, big plates were timing out at 180
 MIN_ATTEMPT_S = 10  # less than this left: do not start another attempt
 clock = time.monotonic  # the tests replace it
 
