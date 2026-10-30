@@ -190,6 +190,20 @@ test('/api/arm checks the password; five wrong tries lock that device', async ()
   assert.equal((await locked.json()).error, 'locked');
 });
 
+test('/api/teacher/arm shows the ARM password only with the teacher key', async () => {
+  const ask = (key, e) => worker.fetch(new Request('https://uploadmymodel.com/api/teacher/arm', {
+    headers: { 'x-teacher-key': key, 'x-client-id': DEVICE, 'cf-connecting-ip': '203.0.113.9' },
+  }), { ...e, TEACHER_KEY: 'test-teacher-key-123' });
+  const wrong = await ask('nope', env());
+  assert.equal(wrong.status, 401);
+  assert.equal(JSON.stringify(await wrong.json()).includes('test-arm-key'), false);
+  const right = await ask('test-teacher-key-123', env());
+  assert.equal(right.status, 200);
+  assert.equal(right.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await right.json(), { password: 'test-arm-key' });
+  assert.deepEqual(await (await ask('test-teacher-key-123', env({ armKey: '' }))).json(), { password: null });
+});
+
 test('custom layer heights stay inside 80% of the 0.50 mm nozzle (Cura warns past it)', () => {
   const values = (id) => ARM_SETTINGS.find((d) => d.id === id).options.filter((o) => o.value !== null).map((o) => o.value);
   const layer = values('layerHeight');

@@ -205,6 +205,7 @@ $('#load').addEventListener('click', async () => {
     $('#warmCard').hidden = false;
     $('#slicingCard').hidden = false;
     loadSlicing();
+    loadArm();
     say('Class setup loaded.', 'ok');
   } catch (e) {
     say(e.message, 'error');
@@ -242,6 +243,23 @@ $('#warmup').addEventListener('click', async () => {
   } catch {
     $('#warmStatus').textContent = 'Could not reach the server.';
   }
+});
+
+// ---- Assistant to the Regional Manager password ----------------------------------------------------
+
+async function loadArm() {
+  try {
+    const r = await fetch('/api/teacher/arm', { headers: { 'x-teacher-key': keyInput.value.trim(), 'x-client-id': CLIENT_ID } });
+    if (!r.ok) return;
+    const { password } = await r.json();
+    $('#armPassword').textContent = password ?? 'Not set up on this site yet.';
+    $('#armCard').hidden = false;
+  } catch { /* the card stays hidden */ }
+}
+
+$('#forget').addEventListener('click', () => {
+  $('#armCard').hidden = true;
+  $('#armPassword').textContent = '';
 });
 
 // ---- Slicing window + class phrase ------------------------------------------------------------------

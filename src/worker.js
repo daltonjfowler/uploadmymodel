@@ -276,6 +276,11 @@ async function handleTeacher(request, env, url, ctx) {
       return json(503, { error: 'slicer', message: 'The slicer did not answer. Try again in a minute.' });
     }
   }
+  // The ARM password in plain text, for a teacher who forgot it (Dalton, 2026-10-29). Only behind the teacher key.
+  if (url.pathname === '/api/teacher/arm') {
+    if (request.method !== 'GET') return json(405, { error: 'method', message: 'Use GET.' });
+    return json(200, { password: env.ARM_KEY || null });
+  }
   if (url.pathname !== '/api/teacher/class') return json(404, { error: 'not_found', message: 'No such API.' });
   if (request.method === 'GET') {
     const config = await readClassConfig(env, { strict: true });
