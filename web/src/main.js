@@ -7,7 +7,10 @@ import { LIMITS, PRINTER, formatMinutes, gcodeFileName, materialById, summarize 
 import { Vector3 } from 'three';
 import { $, confirmDialog, el, esc, fmt } from './dom.js';
 import { LINE_TYPES, filamentGrams, formatDuration, parseGcode } from './gcode.js';
-import { ACCEPT, LoadError, loadModelFile, sampleModel } from './loaders.js';
+import {
+  DEFAULTS as PICTURE_DEFAULTS, KINDS as PICTURE_KINDS, PICTURE_ACCEPT, gridFor, grayGrid, inkOf, isPicture, picturePlate, plateSize, readPicture, stretch,
+} from './image-plate.js';
+import { ACCEPT, LoadError, baseName, loadModelFile, sampleModel } from './loaders.js';
 import { meshHealth } from './mesh-health.js';
 import { closeHolesIfBetter } from './mesh-repair.js';
 import { PLANE_DIRS, planeAlong } from './plane-cut.js';
@@ -129,7 +132,7 @@ function busy(text) {
 // ---- Opening files ----------------------------------------------------------------------------
 
 const fileInput = $('#fileInput');
-fileInput.accept = ACCEPT;
+fileInput.accept = `${ACCEPT},${PICTURE_ACCEPT}`;
 fileInput.addEventListener('change', () => {
   loadFiles([...fileInput.files]);
   fileInput.value = '';
@@ -172,8 +175,10 @@ async function openGcode(file) {
 
 async function loadFiles(files) {
   const gcode = files.filter((f) => /\.gcode$/i.test(f.name));
-  files = files.filter((f) => !gcode.includes(f));
+  const pictures = files.filter((f) => isPicture(f.name));
+  files = files.filter((f) => !gcode.includes(f) && !pictures.includes(f));
   if (gcode.length) await openGcode(gcode.at(-1));
+  if (pictures.length) openPicture(pictures.at(-1)); // the dialog waits on top while models load
   if (files.length && stage === 'preview') setStage('prepare');
   for (const file of files) {
     if (viewer.models.length >= LIMITS.maxObjects) {
@@ -285,6 +290,230 @@ window.addEventListener('drop', (e) => {
   $('#drop').hidden = true;
   if (e.dataTransfer?.files.length) loadFiles([...e.dataTransfer.files]);
 });
+
+// ---- Picture to plate (image-plate.js) ----------------------------------------------------------
+// A picture becomes a raised or engraved plate, or a lithophane. It makes a new model, so unlike the
+// tools above it needs nothing selected.
+
+// kept: each kind's last values, so switching kinds and back keeps what the student typed.
+const pic = { file: null, bitmap: null, o: { ...PICTURE_DEFAULTS.raised }, kept: {} };
+const picInput = $('#picInput');
+picInput.accept = PICTURE_ACCEPT;
+picInput.addEventListener('change', () => {
+  if (picInput.files[0]) setPicture(picInput.files[0]);
+  picInput.value = '';
+});
+$('#picChoose').addEventListener('click', () => picInput.click());
+$('#pictureBtn').addEventListener('click', () => openPicture());
+$('#emptyPicture').addEventListener('click', () => openPicture());
+
+function openPicture(file) {
+  if (stage === 'preview') setStage('prepare');
+  const dialog = $('#pictureDialog');
+  renderPicture();
+  dialog.returnValue = '';
+  if (!dialog.open) dialog.showModal();
+  if (file) setPicture(file);
+  else $('#picChoose').focus();
+}
+
+async function setPicture(file) {
+  try {
+    const bitmap = await readPicture(file);
+    pic.bitmap?.close();
+    pic.bitmap = bitmap;
+    pic.file = file;
+    $('#picName').textContent = file.name;
+    refreshPicture();
+  } catch (err) {
+    $('#picError').hidden = false;
+    $('#picError').textContent = err instanceof LoadError ? err.message : `Could not open "${file.name}".`;
+  }
+}
+
+function renderPicture() {
+  const seg = $('#picKind');
+  seg.innerHTML = '';
+  for (const [kind, k] of Object.entries(PICTURE_KINDS)) {
+    const b = button(esc(k.label), () => {
+      if (kind === pic.o.kind) return;
+      pic.kept[pic.o.kind] = pic.o;
+      pic.o = pic.kept[kind] ?? { ...PICTURE_DEFAULTS[kind] };
+      renderPicture();
+    }, kind === pic.o.kind ? 'on' : '');
+    b.setAttribute('aria-pressed', String(kind === pic.o.kind));
+    seg.append(b);
+  }
+  $('#picBlurb').textContent = PICTURE_KINDS[pic.o.kind].blurb;
+  const f = $('#picFields');
+  f.innerHTML = '';
+  const o = pic.o;
+  f.append(picNumber('Width', 'width', 10, 250, 1));
+  if (o.kind === 'lithophane') {
+    f.append(picNumber('Thinnest', 'thin', 0.4, 3), picNumber('Thickest', 'thick', 0.8, 8), picNumber('Frame', 'border', 0, 20));
+    f.append(picCheck('Stand it up on a foot (much sharper picture)', 'stand'));
+  } else {
+    f.append(
+      picNumber('Plate', 'base', 0.6, 10),
+      picNumber(o.kind === 'raised' ? 'Raised by' : 'Cut depth', 'depth', 0.2, 10),
+      picNumber('Border', 'border', 0, 20),
+    );
+    const style = el('div', { class: 'seg', role: 'group', 'aria-label': 'Picture style' });
+    for (const [id, label] of [['shape', 'Sharp shape'], ['shades', 'Shades']]) {
+      style.append(button(label, () => {
+        o.style = id;
+        renderPicture();
+      }, o.style === id ? 'on' : ''));
+    }
+    f.append(style);
+    if (o.style === 'shape') {
+      const row = el('label', { class: 'pic-row slider-row' });
+      const range = el('input', { type: 'range', min: 5, max: 95, step: 1, 'aria-label': 'Dark cut-off' });
+      range.value = String(Math.round(o.threshold * 100));
+      range.addEventListener('input', () => {
+        o.threshold = Number(range.value) / 100;
+        refreshPicture();
+      });
+      row.append(el('span', {}, 'Cut-off'), range);
+      f.append(row);
+    }
+    f.append(picCheck('Swap dark and light', 'swap'));
+  }
+  refreshPicture();
+}
+
+function picNumber(label, key, min, max, step = 0.1) {
+  const row = el('label', { class: 'pic-row' });
+  const input = el('input', { type: 'number', min, max, step, inputmode: 'decimal' });
+  input.value = String(pic.o[key]);
+  input.addEventListener('change', () => {
+    const v = Number(input.value);
+    if (input.value !== '' && Number.isFinite(v)) pic.o[key] = Math.round(Math.min(max, Math.max(min, v)) * 100) / 100;
+    input.value = String(pic.o[key]);
+    refreshPicture();
+  });
+  // Enter would press the form's first button (Cancel): take the number instead.
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      input.blur();
+    }
+  });
+  row.append(el('span', {}, label), input, el('span', { class: 'field-unit' }, 'mm'));
+  return row;
+}
+
+function picCheck(label, key) {
+  const row = el('label', { class: 'check' });
+  const box = el('input', { type: 'checkbox' });
+  box.checked = !!pic.o[key];
+  box.addEventListener('change', () => {
+    pic.o[key] = box.checked;
+    refreshPicture();
+  });
+  row.append(box, el('span', {}, label));
+  return row;
+}
+
+/** Something about the numbers that cannot work, for the student, or null. */
+function pictureProblem(o) {
+  if (o.kind === 'lithophane') {
+    if (o.thick < o.thin + 0.4) return 'Make Thickest at least 0.4 mm more than Thinnest, or the picture will not show.';
+    if (o.stand && o.border < 2) return 'Standing up needs a Frame of 2 mm or more: the foot holds the frame.';
+  } else if (o.width - 2 * o.border < 5) return 'The border leaves no room for the picture. Make the Border smaller.';
+  return null;
+}
+
+function refreshPicture() {
+  const o = pic.o;
+  const size = pic.bitmap ? plateSize(pic.bitmap.width / pic.bitmap.height, o) : null;
+  drawPicturePreview();
+  const legend = { raised: 'Orange stands up.', engraved: 'Orange is cut in.', lithophane: 'How it looks with a light behind it.' }[o.kind];
+  $('#picSize').textContent = size ? `${legend} ${mm(size.x)} × ${mm(size.y)} mm, ${mm(size.z)} mm tall.` : '';
+  const bed = viewer.printer.bed;
+  const tooBig = size && (size.x > bed.x || size.y > bed.y || size.z > bed.z);
+  const error = pictureProblem(o) ?? (tooBig ? `That is bigger than the printer (${bed.x} × ${bed.y} mm). Make the Width smaller.` : null);
+  $('#picError').hidden = !error;
+  $('#picError').textContent = error ?? '';
+  $('#picOk').disabled = !pic.bitmap || !!error;
+  $('#picTip').textContent = {
+    raised: `Two colours: ask your teacher for a filament-change pause at ${mm(o.base)} mm, where the picture starts.`,
+    engraved: 'After printing, fill the cut with paint or a marker so the picture stands out.',
+    lithophane: o.stand
+      ? 'Print it in white. Ask your teacher about 100% infill so the light comes through evenly.'
+      : 'Lying flat prints faster, but the shades come out in steps. Standing up gives a much sharper picture.',
+  }[o.kind];
+}
+
+/** 80 → "80", 61.53 → "61.5" (fmt would say "80.0"). */
+const mm = (n) => String(Math.round(n * 10) / 10);
+
+function hexRgb(color, fallback) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(color.trim());
+  if (!m) return fallback;
+  const n = parseInt(m[1], 16);
+  return [n >> 16, (n >> 8) & 255, n & 255];
+}
+
+/** The plate face, drawn small: plate grey and orange for raised/engraved, light and dark for a lithophane. */
+function drawPicturePreview() {
+  const canvas = $('#picPreview');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!pic.bitmap) return;
+  const o = pic.o;
+  const aspect = pic.bitmap.width / pic.bitmap.height;
+  const { W, H } = gridFor(aspect, o);
+  const s = Math.min(canvas.width / (W + 2 * o.border), canvas.height / (H + 2 * o.border));
+  const pw = Math.max(2, Math.round(W * s)), ph = Math.max(2, Math.round(H * s));
+  const bx = Math.round(o.border * s), by = Math.round(o.border * s);
+  const litho = o.kind === 'lithophane';
+  const plate = [184, 191, 200];
+  const ink = hexRgb(getComputedStyle(document.documentElement).getPropertyValue('--accent'), [194, 65, 12]);
+  const lit = [255, 243, 222], dark = [58, 48, 40];
+  const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  ctx.fillStyle = `rgb(${(litho ? dark : plate).join(',')})`;
+  ctx.fillRect(0, 0, pw + 2 * bx, ph + 2 * by);
+  let gray = grayGrid(pic.bitmap, pw, ph);
+  if (litho) gray = stretch(gray);
+  const img = ctx.createImageData(pw, ph);
+  for (let i = 0; i < gray.length; i++) {
+    const c = litho ? mix(lit, dark, inkOf(gray[i], o)) : mix(plate, ink, inkOf(gray[i], o));
+    img.data.set([c[0], c[1], c[2], 255], i * 4);
+  }
+  ctx.putImageData(img, bx, by);
+}
+
+$('#pictureDialog').addEventListener('close', () => {
+  if ($('#pictureDialog').returnValue === 'ok' && pic.bitmap) makePicturePlate();
+});
+
+async function makePicturePlate() {
+  if (viewer.models.length >= LIMITS.maxObjects) {
+    toast(`That is ${LIMITS.maxObjects} objects already, the most for one plate.`, { kind: 'error' });
+    return;
+  }
+  const o = { ...pic.o };
+  busy('Making the plate…');
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+  try {
+    const aspect = pic.bitmap.width / pic.bitmap.height;
+    const { pc, pr } = gridFor(aspect, o);
+    const positions = picturePlate(grayGrid(pic.bitmap, pc, pr), pc, pr, o, aspect);
+    const plateTris = viewer.models.reduce((n, m) => n + m.triangles, 0);
+    if (plateTris + positions.length / 9 > LIMITS.maxTriangles) {
+      throw new LoadError(`With this plate there would be too much detail to slice (the most is ${fmt(LIMITS.maxTriangles)} triangles). Remove a model first.`);
+    }
+    const model = viewer.addModel(`${baseName(pic.file.name)}-${PICTURE_KINDS[o.kind].name}`, positions);
+    viewer.select(model);
+    if (!viewer.checkFit(model)) checkUnits(model);
+  } catch (err) {
+    toast(err instanceof LoadError ? err.message : 'Could not make a plate from that picture.', { kind: 'error', timeout: 10000 });
+    if (!(err instanceof LoadError)) console.error(err);
+  } finally {
+    busy(null);
+  }
+}
 
 // ---- Tools (left bar) and their panel ---------------------------------------------------------
 
@@ -2029,6 +2258,7 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'm' || e.key === 'M') setTool('mirror');
   else if (e.key === 'p' || e.key === 'P') setTool('split');
   else if (e.key === 'v' || e.key === 'V') setTool('servo');
+  else if (!ctrl && (e.key === 'i' || e.key === 'I')) openPicture();
   else if (e.key === 'f' || e.key === 'F') viewer.frameSelection();
 });
 

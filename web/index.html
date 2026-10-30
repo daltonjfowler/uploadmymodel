@@ -81,6 +81,7 @@
       <button class="tool" type="button" data-tool="mirror" title="Mirror (M)"><span class="ti" aria-hidden="true">⇋</span><span class="tl">Mirror</span></button>
       <button class="tool" type="button" data-tool="split" title="Split or cut into pieces (P)"><span class="ti" aria-hidden="true">✂</span><span class="tl">Split</span></button>
       <button class="tool" type="button" data-tool="servo" title="Servo pocket, mount or horn (V)"><span class="ti" aria-hidden="true">⚙</span><span class="tl">Servo</span></button>
+      <button class="tool" type="button" id="pictureBtn" title="Picture to plate: raised, engraved or lithophane (I)"><span class="ti" aria-hidden="true">🖼</span><span class="tl">Picture</span></button>
       <span class="tool-sep"></span>
       <button class="tool" type="button" id="dupBtn" title="Duplicate (Ctrl+D)"><span class="ti" aria-hidden="true">⧉</span><span class="tl">Copy</span></button>
       <button class="tool danger" type="button" id="delBtn" title="Delete (Delete key)"><span class="ti" aria-hidden="true">🗑</span><span class="tl">Delete</span></button>
@@ -94,6 +95,7 @@
         <p>STL, OBJ or 3MF, from Tinkercad, Onshape, Fusion 360, Blender or Thingiverse.</p>
         <div class="empty-actions">
           <button id="emptyOpen" class="primary big" type="button">📂 Open model</button>
+          <button id="emptyPicture" class="ghost" type="button">🖼 Picture to plate</button>
           <button id="sample" class="ghost" type="button">Try a sample</button>
         </div>
       </div>
@@ -167,6 +169,7 @@
         <tr><td>Pick several</td><td><kbd>Ctrl</kbd> + click each one, or <kbd>Ctrl</kbd>+<kbd>A</kbd> for all</td></tr>
         <tr><td>Turn by dragging</td><td>Rotate tool, then drag a coloured ring (snaps to 15°)</td></tr>
         <tr><td>Tools</td><td><kbd>T</kbd> move · <kbd>S</kbd> scale · <kbd>R</kbd> rotate · <kbd>M</kbd> mirror</td></tr>
+        <tr><td>Picture to plate</td><td><kbd>I</kbd>, or open a PNG or JPG: raised, engraved, or a lithophane you shine a light through</td></tr>
         <tr><td>Nudge a model</td><td>Arrow keys (1 mm), Shift + arrows (10 mm)</td></tr>
         <tr><td>More actions</td><td>Right-click a model (on a touch screen, press and hold): split into separate objects, copy, lay flat, delete</td></tr>
         <tr><td>Copy / delete</td><td><kbd>Ctrl</kbd>+<kbd>D</kbd> · <kbd>Delete</kbd></td></tr>
@@ -185,6 +188,32 @@
       <p>uploadmymodel is a 3D print slicer in Chrome. Open an STL, OBJ or 3MF model, set it on the bed, and slice it with your class's settings for the LulzBot TAZ Workhorse. Then save the G-code to the SD card and carry it to the printer. Nothing to install.</p>
       <p class="note">Made by <a href="https://daltonjfowler.com" target="_blank" rel="noopener">Dalton Fowler</a>. <a href="/legal" target="_blank" rel="noopener">Privacy &amp; legal</a></p>
       <div class="dialog-actions"><button class="primary" value="close">Got it</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="pictureDialog" class="dialog picture-dialog">
+    <form method="dialog">
+      <h2>Picture to plate</h2>
+      <div class="pic-file">
+        <button id="picChoose" type="button">📂 Choose a picture…</button>
+        <span id="picName" class="note">PNG or JPG. Logos and drawings work best for Raised and Engraved, photos for Lithophane.</span>
+        <input id="picInput" type="file" hidden>
+      </div>
+      <div id="picKind" class="seg" role="group" aria-label="Kind of plate"></div>
+      <p id="picBlurb" class="note"></p>
+      <div class="pic-body">
+        <div class="pic-preview">
+          <canvas id="picPreview" width="260" height="200" aria-label="Preview of the plate"></canvas>
+          <p id="picSize" class="note"></p>
+        </div>
+        <div id="picFields" class="pic-fields"></div>
+      </div>
+      <p id="picTip" class="advice ok"></p>
+      <p id="picError" class="advice warn" hidden></p>
+      <div class="dialog-actions">
+        <button value="cancel" type="submit" formnovalidate>Cancel</button>
+        <button id="picOk" value="ok" class="primary" type="submit" disabled>Put it on the plate</button>
+      </div>
     </form>
   </dialog>
 

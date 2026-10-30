@@ -25,6 +25,11 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   - `src/loaders.js`: STL / OBJ / 3MF → triangle soup, and the sample model.
   - `src/plate-store.js`: keeps the plate in IndexedDB so a reloaded tab gets it back.
   - `src/mesh-health.js`: open / over-shared edge check ("holes" flag), run once per model in idle.
+  - `src/image-plate.js`: Picture to plate (left-bar Picture button, key I, or open a PNG/JPG): raised,
+    engraved or lithophane, as one closed heightfield shell, all in the browser. A standing lithophane gets
+    a foot (overlaps the panel; Cura's meshfix_union_all joins them) and never thickens more than 40° from
+    upright going up, so tree supports never land on the picture. Tests: `test/image-plate.test.mjs`,
+    `test/browser/picture.test.mjs`.
   - `src/gcode.js`: reads Cura G-code (`;LAYER:`, `;TYPE:`) into printed lines per type and layer
     for the Preview tab. Tested against the school Benchy (`test/gcode.test.mjs`). Opening a
     `.gcode` file previews it; a real slice result will preview the same way.
