@@ -1,9 +1,9 @@
 // Teacher page end to end, against local dev (key from .dev.vars) or a base URL + key.
 import { chromium } from 'playwright-core';
 import { BASE, BENCHY, CHROME, OUT, ensureMushroom } from './lib.mjs';
-import { TEST_PHRASE, closeSlicing, openSlicing } from './lib.mjs';
+import { TEST_PHRASE, closeSlicing, openSlicing, signInShared } from './lib.mjs';
 const base = process.argv[2] || BASE;
-const key = process.argv[3] || 'local-test-key-not-real';
+const key = process.argv[3] || process.env.UMM_TEACHER_KEY || 'local-test-key-not-real';
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 } });
 const page = await ctx.newPage();
@@ -12,17 +12,15 @@ page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 page.on('console', (m) => { if (m.type() === 'error' && !/501|401|400|cloudflareinsights/.test(m.text())) errors.push(m.text()); });
 const check = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}: ${JSON.stringify(got)}${ok ? '' : ` (want ${JSON.stringify(want)})`}`); if (!ok) process.exitCode = 1; };
 
-// wrong key
+// wrong key (the sign-in box, web/src/teacher-account.ts)
 await page.goto(base + 'teacher/');
-await page.fill('#key', 'wrong-key');
-await page.click('#load');
-await page.waitForSelector('#status[data-tone="error"]');
-check('wrong key refused', await page.$eval('#status', (e) => e.textContent), 'That teacher key was refused. Check it and try again.');
+await signInShared(page, 'wrong-key');
+await page.waitForSelector('#account .ta-msg[data-tone="error"]');
+check('wrong key refused', await page.$eval('#account .ta-msg', (e) => e.textContent), 'That shared key is not right.');
 check('setup hidden', await page.$eval('#setup', (e) => e.hidden), true);
 
 // right key: lock walls at 3, infill at 15, set a note, save
-await page.fill('#key', key);
-await page.click('#load');
+await signInShared(page, key);
 await page.waitForSelector('#setup:not([hidden])');
 check('7 setting rows', await page.$$eval('#rows tr', (r) => r.length), 7);
 check('print limit choices', await page.$$eval('#maxPrint option', (o) => o.map((x) => x.textContent)), ['No limit', '30 min', '45 min', '1 h', '1 h 30 min', '2 h', '3 h', '4 h', '5 h', '8 h']);

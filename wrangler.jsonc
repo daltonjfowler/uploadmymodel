@@ -17,9 +17,13 @@
   "kv_namespaces": [
     // This app's own namespace (title uploadmymodel-CLASS_KV). Never reuse uploadmycode's
     // (CLASS_KV) or uploadmylaser's (uploadmylaser-CLASS_KV).
-    { "binding": "CLASS_KV", "id": "348e4cd89f9a4f5da842763149d5d96d" }
+    { "binding": "CLASS_KV", "id": "348e4cd89f9a4f5da842763149d5d96d" },
+    // Teacher accounts (src/teachers.ts): ONE namespace shared by all four uploadmy sites on purpose,
+    // so a password works everywhere. Holds names and salted password hashes, never passwords.
+    { "binding": "TEACHERS_KV", "id": "6c37dd40d71545e989448c728031746e" }
   ],
-  // TEACHER_KEY is a secret: npx wrangler secret put TEACHER_KEY
+  // Secrets: TEACHER_SESSION_KEY signs teacher sessions; TEACHER_KEY (+ _2) is the old shared key, still
+  // accepted until deleted. npx wrangler secret put <NAME>, value piped in, never typed on the command line.
   // The slicer: CuraEngine 4.13.2 in a container (container/README.md). 1 vCPU / 3 GiB is the
   // smallest custom size (Cloudflare needs 3 GiB per vCPU; slicing itself peaks at ~300 MiB on the
   // biggest plate): a supported Benchy in about 16 s, five times faster than basic (79 s). More

@@ -30,18 +30,9 @@
       never student settings.</p>
 
     <section class="card page-card">
-      <h2>Teacher key</h2>
-      <form id="keyForm" class="key-row">
-        <!-- a fixed user name, so the browser's password manager can save and fill the key -->
-        <input type="text" name="username" autocomplete="username" value="teacher" hidden>
-        <input id="key" name="password" type="password" autocomplete="current-password" placeholder="teacher key" aria-label="Teacher key">
-        <button id="load" class="primary" type="submit">Open class setup</button>
-      </form>
-      <div class="key-actions">
-        <label class="check"><input id="remember" type="checkbox" aria-describedby="rememberWarn"> <span>Remember on this computer</span></label>
-        <button id="forget" class="linkbtn" type="button">Forget the key on this computer</button>
-      </div>
-      <p id="rememberWarn" class="note">Only on your own computer, never on a shared Chromebook.</p>
+      <h2>Teacher sign-in</h2>
+      <!-- src/teacher-account.ts: sign in, choose a password, teacher accounts, recent changes -->
+      <div id="account"></div>
     </section>
 
     <section id="slicingCard" class="card page-card" hidden>
@@ -144,7 +135,6 @@
         <li>Print from USB: first check a printer talks to a Chromebook on the
           <a href="/usb-test/">printer USB test page</a> (read-only).</li>
         <li>Student name on the printer screen during the print.</li>
-        <li>One password for all three sites, for you and a coworker.</li>
       </ul>
     </section>
   </main>

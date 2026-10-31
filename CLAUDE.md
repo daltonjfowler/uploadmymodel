@@ -15,7 +15,7 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
     `window.umm = { viewer, panel }` for browser tests.
   - `src/settings-panel.js`: Recommended / Custom settings card and hover help.
   - `src/main.js`: tools, object list, Slice / result card, keyboard, drag and drop.
-  - `teacher/index.html` + `src/teacher.js`: the teacher page (key, slicing window + class phrase,
+  - `teacher/index.html` + `src/teacher.js`: the teacher page (sign-in, slicing window + class phrase,
     which settings are locked, class defaults, print-time limit, note, slicer warm-up).
   - `src/printer-usb.js`: "Copy to printer (USB)": writes the G-code onto the printer's SD card with
     M28/M29 (never prints, never deletes). Lines go out only after "Writing to file"; the copy stops if
@@ -38,7 +38,12 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
   `/api/class` (public class setup), `/api/teacher/class` (GET/PUT, needs `x-teacher-key`), and
   `/api/slice` (checks settings, the teacher's locks, the STL and limits, then answers 501 until
   the engine exists). Class setup lives in KV `uploadmymodel-CLASS_KV` under the key `class`.
-  `TEACHER_KEY` is a Worker secret; for local dev put a throwaway one in `.dev.vars`.
+  `TEACHER_SESSION_KEY` and `TEACHER_KEY` are Worker secrets; for local dev put throwaway ones in `.dev.vars`.
+- Teacher accounts (Dalton 2026-10-30): `src/teachers.ts` (server) and `web/src/teacher-account.ts` + `.css`
+  (teacher page) are the SAME files on all four uploadmy sites: change one, copy to all four. Each teacher picks
+  their own password (start code first); accounts live in the shared `TEACHERS_KV` namespace, sessions are signed
+  with this site's `TEACHER_SESSION_KEY` secret and sent as `x-teacher-key`. The old shared `TEACHER_KEY`(_2) still
+  works until those secrets are deleted. Teacher changes are logged with the name (`logChange`, "Recent changes").
 - `scripts/make-icons.mjs`: draws the icon. Edit the icon there, never `web/public/icon.svg` by hand.
 - `docs/HARDWARE.md`: printer and slicer facts, each with its source.
 - `docs/ENGINE_OPTIONS.md` + `engine/`: the CuraEngine spike. `engine/resolve.py` does Cura's

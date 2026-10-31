@@ -2,10 +2,10 @@
 import { chromium } from 'playwright-core';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { BASE, BENCHY, CHROME } from './lib.mjs';
+import { BASE, BENCHY, CHROME, signInShared } from './lib.mjs';
 const axe = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 const base = process.argv[2] || BASE;
-const key = process.argv[3] || 'local-test-key-not-real';
+const key = process.argv[3] || process.env.UMM_TEACHER_KEY || 'local-test-key-not-real';
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const scan = async (page, label) => {
   await page.addScriptTag({ content: axe });
@@ -31,8 +31,7 @@ for (const scheme of ['light', 'dark']) {
   await page.waitForSelector('#previewCard:not([hidden])');
   await scan(page, `${scheme}: preview`);
   await page.goto(base + 'teacher/');
-  await page.fill('#key', key);
-  await page.click('#load');
+  await signInShared(page, key);
   await page.waitForSelector('#setup:not([hidden])');
   await scan(page, `${scheme}: teacher page`);
   await page.close();

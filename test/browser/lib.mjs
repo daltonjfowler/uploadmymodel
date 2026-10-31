@@ -54,6 +54,17 @@ export async function openSlicing(request, base, key, minutes = 15) {
   });
 }
 
+/**
+ * Sign in on the teacher page (web/src/teacher-account.ts) with the old shared key, which still works
+ * until TEACHER_KEY is deleted. The page must already be on teacher/.
+ */
+export async function signInShared(page, key) {
+  await page.waitForSelector('#taWho option[value="shared"]', { state: 'attached' });
+  await page.selectOption('#taWho', 'shared');
+  await page.fill('#taPassword', key);
+  await page.click('#account form button[type=submit]');
+}
+
 /** For browser.newContext(): the page already knows the phrase (sessionStorage). */
 export async function knowPhrase(ctx) {
   await ctx.addInitScript((p) => { try { sessionStorage.setItem('umm.phrase', p); } catch {} }, TEST_PHRASE);

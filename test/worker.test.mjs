@@ -623,3 +623,72 @@ test('search engines may list the student page and /legal; teacher, API, test pa
   assert.equal(www.status, 301);
   assert.equal(www.headers.get('x-robots-tag'), 'noindex, nofollow');
 });
+
+// Teacher accounts (src/teachers.ts, tested on its own in teachers.test.mjs) wired into this Worker's gate.
+function accountsKv() {
+  const m = new Map();
+  return {
+    async get(k) { return m.has(k) ? JSON.parse(m.get(k).value) : null; },
+    async put(k, value, opts) { m.set(k, { value, metadata: opts?.metadata }); },
+    async delete(k) { m.delete(k); },
+    async list({ prefix }) {
+      return { keys: [...m].filter(([k]) => k.startsWith(prefix)).map(([name, v]) => ({ name, metadata: v.metadata })), list_complete: true };
+    },
+  };
+}
+
+test('teacher accounts: start code, own password, session reaches every teacher call; changes are logged with the name', async () => {
+  const { resetKeyguard } = await import('../src/keyguard.js');
+  resetKeyguard();
+  const e = { ...env(), TEACHER_KEY: 'test-teacher-key-123', TEACHERS_KV: accountsKv(), TEACHER_SESSION_KEY: 'test-session-secret', lockoutStore: memoryStore() };
+  const call = (path, { method = 'GET', key, body, device = '12345678-aaaa-4bbb-8ccc-1234567890ab' } = {}) => worker.fetch(new Request(`https://uploadmymodel.com${path}`, {
+    method,
+    headers: { ...(key ? { 'x-teacher-key': key } : {}), 'x-client-id': device, 'cf-connecting-ip': '198.51.100.60', 'content-type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  }), e, {});
+
+  assert.deepEqual(await (await call('/api/teachers')).json(), { people: [], shared: true, accounts: true });
+  const added = await (await call('/api/teacher/people', { method: 'POST', key: 'test-teacher-key-123', body: { name: 'Axel' } })).json();
+  assert.match(added.code, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+
+  // The start code signs in, but only to choose a password.
+  let res = await call('/api/teacher/signin', { method: 'POST', body: { id: 'axel', password: added.code } });
+  assert.equal(res.status, 200);
+  const setup = await res.json();
+  assert.equal(setup.setup, true);
+  res = await call('/api/teacher/class', { key: setup.token });
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).message, 'Choose your own password first.');
+  res = await call('/api/teacher/password', { method: 'POST', key: setup.token, body: { next: 'axels test password' } });
+  assert.equal(res.status, 200);
+  const { token } = await res.json();
+
+  // The session works on every teacher call, the ARM password included, and changes carry the name.
+  assert.equal((await call('/api/teacher/class', { key: token })).status, 200);
+  assert.equal((await call('/api/teacher/arm', { key: token })).status, 200);
+  assert.equal((await call('/api/teacher/slicing', { method: 'PUT', key: token, body: { phrase: 'cat', minutes: 90 } })).status, 200);
+  assert.equal((await call('/api/teacher/slicing', { method: 'DELETE', key: token })).status, 200);
+  const { changes } = await (await call('/api/teacher/changes', { key: token })).json();
+  assert.deepEqual(changes.map((c) => `${c.who}: ${c.what}`), [
+    'Axel: Closed slicing', 'Axel: Opened slicing for 1 h 30 min', 'Axel: Chose their password', 'Shared key: Added Axel',
+  ]);
+
+  // A wrong password counts like a wrong key: 5 lock that device, even for the right password.
+  for (let i = 1; i <= 5; i++) {
+    assert.equal((await call('/api/teacher/signin', { method: 'POST', body: { id: 'axel', password: 'not my password' } })).status, 401, `try ${i}`);
+  }
+  assert.equal((await call('/api/teacher/signin', { method: 'POST', body: { id: 'axel', password: 'axels test password' } })).status, 429);
+  assert.equal((await call('/api/teacher/signin', { method: 'POST', body: { id: 'axel', password: 'axels test password' }, device: '87654321-aaaa-4bbb-8ccc-1234567890ab' })).status, 200);
+});
+
+test('teacher gate: nothing set up (no shared key, no accounts) refuses every teacher call', async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const e = { ...env(), TEACHERS_KV: accountsKv() }; // accounts need the session secret too
+    const res = await worker.fetch(new Request('https://uploadmymodel.com/api/teacher/me', { headers: { 'x-teacher-key': 'anything' } }), e, {});
+    assert.equal(res.status, 401);
+  } finally {
+    console.error = quiet;
+  }
+});

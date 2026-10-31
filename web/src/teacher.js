@@ -1,4 +1,4 @@
-// Teacher page: the key, then which settings students may change and what they start at, then a
+// Teacher page: the sign-in, then which settings students may change and what they start at, then a
 // note to students. Saves to /api/teacher/class; the Worker checks it with the same rules
 // (shared/settings.js validateClassConfig) and the student page follows it.
 
@@ -8,8 +8,9 @@ import {
 } from '../../shared/settings.js';
 import { $, el } from './dom.js';
 import { initThemeButton } from './theme.js';
+import { mountAccount } from './teacher-account.ts';
 
-const KEY_STORAGE = 'umm.teacherKey';
+const KEY_STORAGE = 'umm.teacherKey'; // the sign-in (an old saved key here still works until it is deleted)
 
 // A random id for this browser (the same one the student page makes), sent as x-client-id: the
 // server's wrong-key lockout counts per device, so one student cannot lock the teacher out.
@@ -33,48 +34,18 @@ function say(text, tone = 'plain') {
   s.dataset.tone = tone;
 }
 
-// ---- Key ----------------------------------------------------------------------------------------
+// ---- Sign-in ------------------------------------------------------------------------------------
 
-const keyInput = $('#key');
-try {
-  const saved = localStorage.getItem(KEY_STORAGE);
-  if (saved) {
-    keyInput.value = saved;
-    $('#remember').checked = true;
-  }
-} catch { /* storage blocked: type the key each time */ }
+// The sign-in box (teacher-account.ts) is mounted at the end of this file, once everything it calls exists.
+let account = null;
 
-let offered = false;
-/** Once a key works, ask the browser's password manager to keep it (Chrome and Edge show "Save password?"). */
-function offerToSaveKey() {
-  if (offered || !window.PasswordCredential || !navigator.credentials) return;
-  offered = true;
-  navigator.credentials.store(new window.PasswordCredential({ id: 'teacher', password: keyInput.value.trim(), name: 'Teacher key' })).catch(() => {});
-}
-
-function rememberKey() {
-  try {
-    if ($('#remember').checked) localStorage.setItem(KEY_STORAGE, keyInput.value.trim());
-    else localStorage.removeItem(KEY_STORAGE);
-  } catch { /* fine */ }
-}
-
-$('#forget').addEventListener('click', () => {
-  try {
-    localStorage.removeItem(KEY_STORAGE);
-  } catch { /* fine */ }
-  keyInput.value = '';
-  $('#remember').checked = false;
-  $('#setup').hidden = true;
-  say('Key forgotten on this computer.');
-});
-
-async function api(method, body) {
-  const key = keyInput.value.trim();
-  if (!key) throw new Error('Type the teacher key first.');
+/** Any teacher call: the sign-in as x-teacher-key. A refused sign-in (401) shows the sign-in box again. */
+async function teacherFetch(path, method = 'GET', body) {
+  const key = account?.credential() ?? '';
+  if (!key) throw new Error('Sign in first (top of this page).');
   let r;
   try {
-    r = await fetch('/api/teacher/class', {
+    r = await fetch(path, {
       method,
       headers: { 'x-teacher-key': key, 'x-client-id': CLIENT_ID, ...(body ? { 'content-type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
@@ -83,11 +54,23 @@ async function api(method, body) {
     throw new Error('Could not reach the server. Check the network.');
   }
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401) throw new Error('That teacher key was refused. Check it and try again.');
+  if (r.status === 401) {
+    account.refused();
+    throw new Error('Your sign-in ended. Sign in again at the top of this page.');
+  }
+  if (r.ok && method !== 'GET') account.refreshChanges();
+  return { r, j };
+}
+
+/** A teacher call that throws the server's sentence when it fails. */
+async function teacherApi(path, method = 'GET', body) {
+  const { r, j } = await teacherFetch(path, method, body);
   if (r.status === 429 && j.error === 'locked') throw new Error(lockedMessage(j));
   if (!r.ok) throw new Error(j.message ?? `Something went wrong (${r.status}).`);
   return j;
 }
+
+const api = (method, body) => teacherApi('/api/teacher/class', method, body);
 
 // Too many wrong keys from this browser: the server waits before it checks keys again.
 function lockedMessage(j) {
@@ -194,12 +177,11 @@ $('#message').addEventListener('input', () => {
 
 // ---- Load / save ----------------------------------------------------------------------------------
 
-$('#load').addEventListener('click', async () => {
+// Signed in: open the class setup, the slicing window and the rest.
+async function openClassSetup() {
   say('Opening…');
   try {
     config = await api('GET');
-    rememberKey();
-    offerToSaveKey();
     renderRows();
     $('#setup').hidden = false;
     $('#warmCard').hidden = false;
@@ -210,9 +192,15 @@ $('#load').addEventListener('click', async () => {
   } catch (e) {
     say(e.message, 'error');
   }
-});
-// Enter in the key box submits the form, which clicks Open class setup
-$('#keyForm').addEventListener('submit', (e) => e.preventDefault());
+}
+
+// Signed out: hide everything a teacher sees.
+function closeClassSetup() {
+  for (const id of ['#setup', '#warmCard', '#slicingCard', '#armCard']) $(id).hidden = true;
+  $('#armPassword').textContent = '';
+  clearInterval(slicingTimer);
+  say('');
+}
 
 $('#school').addEventListener('click', () => {
   config = structuredClone(DEFAULT_CLASS_CONFIG);
@@ -236,12 +224,11 @@ $('#save').addEventListener('click', async () => {
 $('#warmup').addEventListener('click', async () => {
   $('#warmStatus').textContent = 'Waking the slicer…';
   try {
-    const r = await fetch('/api/teacher/warmup', { method: 'POST', headers: { 'x-teacher-key': keyInput.value.trim(), 'x-client-id': CLIENT_ID } });
-    const j = await r.json().catch(() => ({}));
+    const { r, j } = await teacherFetch('/api/teacher/warmup', 'POST');
     $('#warmStatus').textContent = r.ok ? `Ready (${j.engine ?? 'slicer'}, answered in ${j.seconds} s).`
       : r.status === 429 && j.error === 'locked' ? lockedMessage(j) : (j.message ?? `Not ready (${r.status}).`);
-  } catch {
-    $('#warmStatus').textContent = 'Could not reach the server.';
+  } catch (e) {
+    $('#warmStatus').textContent = e.message;
   }
 });
 
@@ -249,32 +236,16 @@ $('#warmup').addEventListener('click', async () => {
 
 async function loadArm() {
   try {
-    const r = await fetch('/api/teacher/arm', { headers: { 'x-teacher-key': keyInput.value.trim(), 'x-client-id': CLIENT_ID } });
+    const { r, j } = await teacherFetch('/api/teacher/arm');
     if (!r.ok) return;
-    const { password } = await r.json();
-    $('#armPassword').textContent = password ?? 'Not set up on this site yet.';
+    $('#armPassword').textContent = j.password ?? 'Not set up on this site yet.';
     $('#armCard').hidden = false;
   } catch { /* the card stays hidden */ }
 }
 
-$('#forget').addEventListener('click', () => {
-  $('#armCard').hidden = true;
-  $('#armPassword').textContent = '';
-});
-
 // ---- Slicing window + class phrase ------------------------------------------------------------------
 
-async function slicingApi(method, body) {
-  const r = await fetch('/api/teacher/slicing', {
-    method,
-    headers: { 'x-teacher-key': keyInput.value.trim(), 'x-client-id': CLIENT_ID, ...(body ? { 'content-type': 'application/json' } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const j = await r.json().catch(() => ({}));
-  if (r.status === 429 && j.error === 'locked') throw new Error(lockedMessage(j));
-  if (!r.ok) throw new Error(j.message ?? `Something went wrong (${r.status}).`);
-  return j;
-}
+const slicingApi = (method, body) => teacherApi('/api/teacher/slicing', method, body);
 
 let slicingTimer = null;
 function showSlicing(s) {
@@ -346,4 +317,11 @@ $('#slicingClose').addEventListener('click', async () => {
   }
 });
 
-if (keyInput.value) $('#load').click();
+// A saved sign-in opens the class setup without a click (mountAccount → onSignedIn).
+account = mountAccount({
+  root: $('#account'),
+  storageKey: KEY_STORAGE,
+  headers: () => ({ 'x-client-id': CLIENT_ID }),
+  onSignedIn: () => void openClassSetup(),
+  onSignedOut: closeClassSetup,
+});

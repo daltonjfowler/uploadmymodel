@@ -29,7 +29,7 @@
   <p class="muted">uploadmymodel · last updated 2026-09-26</p>
 
   <h2>What this is</h2>
-  <p>uploadmymodel is an independent classroom project made by <a href="https://daltonjfowler.com" rel="noopener">Dalton Fowler</a>, a teacher, for his school district's classes. It is not a commercial product and has no accounts, ads or payments.</p>
+  <p>uploadmymodel is an independent classroom project made by <a href="https://daltonjfowler.com" rel="noopener">Dalton Fowler</a>, a teacher, for his school district's classes. It is not a commercial product and has no student accounts, ads or payments.</p>
 
   <h2>Safety</h2>
   <p><strong>uploadmymodel is not a safety system.</strong> It limits the print settings students can change, checks models, and makes print files (G-code) for the printer. The limits it applies reduce mistakes; they do not make a job safe.</p>
@@ -45,7 +45,8 @@
     <li>Your model stays in your browser until you press <strong>Slice</strong>. Then it is sent to the slicer, sliced in a temporary folder and deleted straight after. Models are never saved on the server.</li>
     <li>The name you can type (optional) is only used to make the print file name.</li>
     <li>The teacher's class setup (which settings are locked, the class defaults, the note to students) and the class phrase are kept on the server for the teacher. The class phrase is deleted when the slicing window closes.</li>
-    <li>Your browser keeps these on this device only: your plate (in IndexedDB, so it comes back after a reload), your name, the print settings you changed, a random id used only to keep the slicer fair between students, your theme, and the class phrase for the open tab only. On the teacher page, the teacher key is kept only if the teacher ticks <em>Remember on this computer</em>.</li>
+    <li>Teachers sign in with their own password. The server keeps each teacher's name and a salted hash of the password (never the password itself), plus a short list of recent teacher changes with who made them.</li>
+    <li>Your browser keeps these on this device only: your plate (in IndexedDB, so it comes back after a reload), your name, the print settings you changed, a random id used only to keep the slicer fair between students, your theme, and the class phrase for the open tab only. On the teacher page, the teacher's sign-in is kept in the browser until they press <em>Sign out</em>.</li>
     <li>No accounts, no cookies, no ads, no tracking. Cloudflare adds a Web Analytics script to the site; this site's security settings block it, so it collects nothing.</li>
     <li>The site runs on Cloudflare. Like any web host, Cloudflare keeps short request logs (for example the page asked for, the time, the browser and the network address) for up to 7 days, to keep the site running. They are not used for anything else.</li>
     <li>Your browser may keep your own settings and work (for example your theme, and your plate and your name) on this device only. Clearing site data removes them.</li>

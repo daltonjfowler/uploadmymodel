@@ -10,8 +10,9 @@
 // real answer: G-code bytes with a content-disposition file name.
 //
 // The teacher's class setup (which settings students may change, the class defaults, a note) lives
-// in this app's own KV namespace under "class". GET /api/class is public; /api/teacher/* needs the
-// TEACHER_KEY secret (npx wrangler secret put TEACHER_KEY). No secret set = no teacher access.
+// in this app's own KV namespace under "class". GET /api/class is public; /api/teacher/* needs a
+// teacher: a signed-in account (src/teachers.ts, the TEACHERS_KV namespace + TEACHER_SESSION_KEY
+// secret) or the old shared TEACHER_KEY secret. Nothing set up = no teacher access.
 
 import {
   DEFAULT_CLASS_CONFIG, LIMITS, PRINTER, checkAgainstClass, formatMinutes, gcodeFileName, safeNamePart, summarize,
@@ -22,6 +23,8 @@ import { MAX_PHRASE, MIN_PHRASE, generatePhrase, normalizePhrase, validateOpenRe
 import { TICKET_PATTERN } from './line.js';
 import { lockout } from './lockout.js';
 import { blockedResponse, countWrongKey } from './keyguard.js';
+// The same file on all four uploadmy sites (wrangler's esbuild bundles the TypeScript; Node strips its types).
+import { AccountError, accountRoute, checkCredential, logChange, readSignIn, setupAllows, signInOptions } from './teachers.ts';
 
 const KV_CLASS = 'class';
 const KV_SLICING = 'slicing'; // { phrase, until } while the teacher has slicing open
@@ -102,12 +105,6 @@ const encoder = new TextEncoder();
 // Secret comparison that leaks nothing through timing: both sides hashed to 32 bytes, then
 // Cloudflare's timingSafeEqual (same as uploadmylaser's src/constant-time.ts). Node (the unit
 // tests) has no crypto.subtle.timingSafeEqual; the loop does the same, never stopping early.
-/** True when `given` equals any of `keys`. Every key is compared, so the time does not say which one. */
-export async function anyKeyEquals(given, keys) {
-  const hits = await Promise.all(keys.map((k) => constantTimeEquals(given, k)));
-  return hits.some(Boolean);
-}
-
 export async function constantTimeEquals(a, b) {
   const [left, right] = await Promise.all([
     crypto.subtle.digest('SHA-256', encoder.encode(a)),
@@ -168,35 +165,43 @@ async function readSlicing(env) {
   return null;
 }
 
-// Key compared first; a wrong key waits a moment (slows guessing). No secret uploaded means no
-// teacher endpoint at all: never fall open. The wrong-guess lockout (src/lockout.js, kind
-// 'teacher') is checked BEFORE the compare: a locked device is refused without comparing. It
-// counts per DEVICE (the page's x-client-id), never per address: a school shares one IP, and a
-// per-address lockout would let one student lock out the teacher or the class. A script can make
-// up device ids, so WRONG keys also count per address (src/keyguard.js, 20 a minute): only past
-// that is an address refused, and right keys are never counted.
-// null = the key is right; otherwise the answer to send.
-async function teacherRefusal(request, env) {
-  // TEACHER_KEY_2: an optional second teacher (a student teacher); delete that secret to remove them.
-  const keys = [env.TEACHER_KEY, env.TEACHER_KEY_2].filter(Boolean);
-  if (!keys.length) {
-    console.error(JSON.stringify({ message: 'TEACHER_KEY is not set; teacher endpoint refused' }));
+// Credential checked first (src/teachers.ts checkCredential: a password or start code when signing
+// in, else a session or the old shared key); a wrong one waits a moment (slows guessing). Nothing
+// set up (no shared key, no accounts) means no teacher endpoint at all: never fall open. The
+// wrong-guess lockout (src/lockout.js, kind 'teacher') is checked BEFORE the compare: a locked
+// device is refused without comparing. It counts per DEVICE (the page's x-client-id), never per
+// address: a school shares one IP, and a per-address lockout would let one student lock out the
+// teacher or the class. A script can make up device ids, so WRONG credentials also count per
+// address (src/keyguard.js, 20 a minute): only past that is an address refused, and right ones are
+// never counted. A wrong password, start code or session counts exactly like a wrong key.
+// { who } = a teacher; { refused } = the answer to send.
+async function teacherCheck(request, env, cred) {
+  // TEACHER_KEY_2: the old second shared key (a student teacher); delete that secret to remove it.
+  if (!env.TEACHER_KEY && !env.TEACHER_KEY_2 && !(env.TEACHERS_KV && env.TEACHER_SESSION_KEY)) {
+    console.error(JSON.stringify({ message: 'no teacher key or accounts set up; teacher endpoint refused' }));
   } else {
-    // Too many wrong keys from one address only slows down WRONG keys (src/keyguard.js): every key is
-    // still compared, so the right key always works. A whole school shares one address, and a student
-    // must never be able to lock the teacher out (Dalton, 2026-09-28). The keys are long and random.
+    // Too many wrong tries from one address only slows down WRONG ones (src/keyguard.js): every
+    // credential is still checked, so the right one always works. A whole school shares one address,
+    // and a student must never be able to lock the teacher out (Dalton, 2026-09-28).
     const lock = await lockout(env, 'teacher', request);
-    if (lock.locked) return lock.response(json);
-    if (await anyKeyEquals(request.headers.get('x-teacher-key') ?? '', keys)) {
+    if (lock.locked) return { refused: lock.response(json) };
+    const who = await checkCredential(env, cred, Date.now());
+    if (who) {
       await lock.right();
-      return null;
+      return { who };
     }
     await lock.wrong();
-    const nowBlocked = await countWrongKey(env, 'teacher', request); // only wrong keys count
-    if (nowBlocked) return blockedResponse(json, nowBlocked);
+    const nowBlocked = await countWrongKey(env, 'teacher', request); // only wrong ones count
+    if (nowBlocked) return { refused: blockedResponse(json, nowBlocked) };
   }
   await new Promise((r) => setTimeout(r, TEACHER_REJECT_DELAY_MS));
-  return json(401, { error: 'key', message: 'Wrong teacher key.' });
+  return { refused: json(401, { error: 'key', message: 'Wrong teacher key.' }) };
+}
+
+// An account error as this site's JSON. The shared sign-in box (teacher-account.ts) shows `error`,
+// this site's pages show `message`, so both carry the sentence.
+function accountRefusal(status, message) {
+  return json(status, { error: message, message });
 }
 
 // The "Assistant to the Regional Manager" password (ARM_KEY secret; header x-arm-key). Its own
@@ -218,8 +223,21 @@ async function armKeyRefusal(request, env) {
 }
 
 async function handleTeacher(request, env, url, ctx) {
-  const refused = await teacherRefusal(request, env);
-  if (refused) return refused;
+  const path = url.pathname;
+  // Signing in sends the name and password in the body; every other call sends the session (or the
+  // old shared key) in x-teacher-key.
+  const cred = path === '/api/teacher/signin' && request.method === 'POST'
+    ? await readSignIn(request)
+    : request.headers.get('x-teacher-key') ?? '';
+  const checked = await teacherCheck(request, env, cred);
+  if (checked.refused) return checked.refused;
+  const who = checked.who;
+  if (who.setup && !setupAllows(path)) return accountRefusal(403, 'Choose your own password first.');
+  // Sign-in, password, teacher accounts and recent changes (src/teachers.ts).
+  const account = await accountRoute(request, path, env, env.CLASS_KV, who, cred, Date.now());
+  if (account) return account;
+  // Every teacher CHANGE is logged with the name ("Recent changes" on the teacher page).
+  const changed = (what) => logChange(env.CLASS_KV, who, what, Date.now());
   if (url.pathname === '/api/teacher/slicing') {
     if (request.method === 'GET') {
       const rec = await readSlicing(env);
@@ -227,6 +245,7 @@ async function handleTeacher(request, env, url, ctx) {
     }
     if (request.method === 'DELETE') {
       await env.CLASS_KV?.delete(KV_SLICING);
+      await changed('Closed slicing');
       // Nothing more can come in: let the slicers sleep (and stop billing) now.
       if (env.slicerStopIdle) ctx?.waitUntil?.(env.slicerStopIdle().catch(() => {}));
       return json(200, { open: false });
@@ -253,11 +272,13 @@ async function handleTeacher(request, env, url, ctx) {
       if (!rec) return json(409, { error: 'closed', message: 'Slicing is closed. Press "Open slicing" to open it with this phrase.' });
       const ttl = Math.max(60, Math.ceil((rec.until - Date.now()) / 1000) + 60);
       await env.CLASS_KV.put(KV_SLICING, JSON.stringify({ phrase: v.phrase, until: rec.until }), { expirationTtl: ttl });
+      await changed('Set a new class phrase');
       return json(200, { open: true, phrase: v.phrase, until: rec.until, engine: !!slicerSender(env) });
     }
     const until = Date.now() + v.minutes * 60_000;
     // KV forgets it by itself a minute after it runs out.
     await env.CLASS_KV.put(KV_SLICING, JSON.stringify({ phrase: v.phrase, until }), { expirationTtl: v.minutes * 60 + 60 });
+    await changed(`Opened slicing for ${formatMinutes(v.minutes)}`);
     // Wake the slicer now, so the first student does not wait for it.
     const send = slicerSender(env);
     if (send) ctx?.waitUntil?.(send('/health', { method: 'GET' }).catch(() => {}));
@@ -276,7 +297,7 @@ async function handleTeacher(request, env, url, ctx) {
       return json(503, { error: 'slicer', message: 'The slicer did not answer. Try again in a minute.' });
     }
   }
-  // The ARM password in plain text, for a teacher who forgot it (Dalton, 2026-10-29). Only behind the teacher key.
+  // The ARM password in plain text, for a teacher who forgot it (Dalton, 2026-10-29). Only behind the teacher gate.
   if (url.pathname === '/api/teacher/arm') {
     if (request.method !== 'GET') return json(405, { error: 'method', message: 'Use GET.' });
     return json(200, { password: env.ARM_KEY || null });
@@ -300,6 +321,7 @@ async function handleTeacher(request, env, url, ctx) {
   if (!v.ok) return json(400, { error: 'invalid', message: 'Some of those values are not allowed.', details: v.errors });
   if (!env.CLASS_KV) return json(503, { error: 'storage', message: 'Storage is not set up on this server.' });
   await env.CLASS_KV.put(KV_CLASS, JSON.stringify(v.config));
+  await changed('Saved the class settings');
   return json(200, v.config);
 }
 
@@ -560,8 +582,22 @@ async function handleApi(request, env, url, ctx) {
     if (request.method !== 'GET') return json(405, { error: 'method', message: 'Use GET.' });
     return json(200, await readClassConfig(env));
   }
-  // Everything under /api/teacher/ needs the key, even paths that do not exist.
-  if (url.pathname.startsWith('/api/teacher/')) return handleTeacher(request, env, url, ctx);
+  // The teacher sign-in list (public): names only, never anything secret. It lists KV, so it counts
+  // against the same per-address limit as the other public KV reads.
+  if (url.pathname === '/api/teachers') {
+    if (request.method !== 'GET') return json(405, { error: 'method', message: 'Use GET.' });
+    if (await overLimit(env.API_RATE_IP, request)) return json(429, { error: 'busy', message: 'Too many requests from your network. Wait a minute and try again.' });
+    return json(200, await signInOptions(env));
+  }
+  // Everything under /api/teacher/ needs a teacher, even paths that do not exist.
+  if (url.pathname.startsWith('/api/teacher/')) {
+    try {
+      return await handleTeacher(request, env, url, ctx);
+    } catch (e) {
+      if (e instanceof AccountError) return accountRefusal(e.status, e.message);
+      throw e;
+    }
+  }
   // Unlocking the "Assistant to the Regional Manager" tab: is this password right? (The slice
   // checks it again; this only opens the tab.) Counts per IP like any API call, plus its lockout.
   if (url.pathname === '/api/arm') {

@@ -1,9 +1,9 @@
 // The class gate end to end (local only: needs the slicer, SLICER_URL): closed means the site
 // works but Slice does not; the teacher opens it with a phrase; students type it once.
 import { chromium } from 'playwright-core';
-import { BASE, CHROME, TEST_PHRASE, openSlicing } from './lib.mjs';
+import { BASE, CHROME, TEST_PHRASE, openSlicing, signInShared } from './lib.mjs';
 const base = process.argv[2] || BASE;
-const key = process.argv[3] || 'local-test-key-not-real';
+const key = process.argv[3] || process.env.UMM_TEACHER_KEY || 'local-test-key-not-real';
 const browser = await chromium.launch({ executablePath: CHROME, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const check = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}: ${JSON.stringify(got)}${ok ? '' : ` (want ${JSON.stringify(want)})`}`); if (!ok) process.exitCode = 1; };
 const errors = [];
@@ -28,8 +28,7 @@ check('server refuses while closed', [direct.status(), (await direct.json()).err
 
 // The teacher opens it from the teacher page.
 await teacher.goto(base + 'teacher/');
-await teacher.fill('#key', key);
-await teacher.click('#load');
+await signInShared(teacher, key);
 await teacher.waitForSelector('#slicingCard:not([hidden])');
 await teacher.fill('#phraseSet', 'Orange Walrus Taco');
 await teacher.selectOption('#slicingMinutes', '50');
