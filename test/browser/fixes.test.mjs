@@ -59,10 +59,10 @@ const teacherPut = (page, config) => page.request.put(base + 'api/teacher/class'
   await page.click('#toolPanel button:has-text("Fit bed")');
   check('group Fit bed: nothing moved or shrank', await page.evaluate(() => window.umm.viewer.models.map((m) => [m.position.x, m.position.y, Math.round(m.size.x * 100) / 100])), before);
 
-  // 7. Copies stop at 12.
+  // 7. No cap on objects any more (was 12; Dalton 2026-11-12): 3 selected, copied 4 times = 15.
   for (let i = 0; i < 4; i++) await page.keyboard.press('Control+d');
   const n = await page.evaluate(() => window.umm.viewer.models.length);
-  check('never more than 12 models', n <= 12, true);
+  check('more than 12 models allowed', n, 15);
 
   // 8. Models that can never come back are freed from the GPU: add one, undo it (it waits in
   // redo), then make a new change (redo is thrown away, so that model is gone for good).

@@ -678,7 +678,7 @@ export class Viewer extends EventTarget {
     copy.mesh.scale.copy(model.mesh.scale);
     copy.position.copy(model.position);
     this.paint(copy);
-    this.placeFree(copy);
+    copy.fitted = this.placeFree(copy);
     this.attach(copy);
     this.record({ label: `copy ${model.name}`, undo: () => this.detach(copy), redo: () => this.attach(copy), models: [copy] });
     this.changed();
@@ -1290,10 +1290,28 @@ export class Viewer extends EventTarget {
     this.forSelected('delete', (m) => this.remove(m));
   }
 
-  duplicateSelected() {
+  /**
+   * Copy every selected model `count` times (one Undo step). Each copy goes to a free spot on the
+   * bed. Returns { copies, noRoom }: noRoom = copies that found no free spot (they sit in the middle).
+   */
+  duplicateSelected(count = 1) {
+    const list = this.selectedList;
     const copies = [];
-    this.forSelected('copy', (m) => copies.push(this.duplicate(m)));
+    let noRoom = 0;
+    if (!list.length || !(count >= 1)) return { copies, noRoom };
+    const label = count > 1 ? `${count} copies` : 'copy';
+    this.transaction(label, () => {
+      for (let i = 0; i < count; i++) {
+        for (const m of list) {
+          const c = this.duplicate(m);
+          copies.push(c);
+          if (!c.fitted) noRoom++;
+          delete c.fitted;
+        }
+      }
+    });
     if (copies.length > 1) this.selectMany(copies, copies.at(-1));
+    return { copies, noRoom };
   }
 
   // Paint faces that will need support red. Runs after any turn, mirror or scale.
@@ -1420,7 +1438,9 @@ export class Viewer extends EventTarget {
       return Math.abs(o.position.x - x) < (os.x + s.x) / 2 + gap && Math.abs(o.position.y - y) < (os.y + s.y) / 2 + gap;
     });
     const inside = (x, y) => Math.abs(x) + s.x / 2 <= lim.x && Math.abs(y) + s.y / 2 <= lim.y;
-    for (let r = 0; r <= 140; r += 5) {
+    // Out to the bed's corners (a 280 mm bed's corner is ~198 mm from the middle).
+    const reach = Math.ceil(Math.hypot(lim.x, lim.y));
+    for (let r = 0; r <= reach; r += 5) {
       const steps = r === 0 ? 1 : Math.ceil((2 * Math.PI * r) / 5);
       for (let k = 0; k < steps; k++) {
         const a = (k / steps) * Math.PI * 2 - Math.PI / 2;
@@ -1428,11 +1448,12 @@ export class Viewer extends EventTarget {
         const y = Math.round(r * Math.sin(a));
         if (inside(x, y) && !hits(x, y)) {
           model.position.set(x, y, 0);
-          return;
+          return true;
         }
       }
     }
     model.position.set(0, 0, 0);
+    return false;
   }
 
   /** placeFree, as one recorded move (for changes after the model is already on the plate). */

@@ -311,7 +311,7 @@ export const LIMITS = {
   maxUploadBytes: 40 * 1024 * 1024,
   // For the whole plate. 40 MB of binary STL at 50 bytes per triangle is ~838k; keep under it.
   maxTriangles: 800_000,
-  maxObjects: 12,
+  // No cap on how many objects (Dalton, 2026-11-12): a plate is limited only by detail and size.
   maxNameLength: 24,
   // A whole G-code file name, without ".gcode". Short names are easier to find on the printer screen.
   maxFileNameLength: 30,

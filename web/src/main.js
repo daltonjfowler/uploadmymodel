@@ -181,10 +181,6 @@ async function loadFiles(files) {
   if (pictures.length) openPicture(pictures.at(-1)); // the dialog waits on top while models load
   if (files.length && stage === 'preview') setStage('prepare');
   for (const file of files) {
-    if (viewer.models.length >= LIMITS.maxObjects) {
-      toast(`That is ${LIMITS.maxObjects} objects already, the most for one plate.`, { kind: 'error' });
-      break;
-    }
     if (file.size > LIMITS.maxUploadBytes * 2) {
       toast(`"${file.name}" is ${fmt(file.size / 1048576)} MB. That is too big to slice here. Ask your teacher to use Cura.`, { kind: 'error', timeout: 10000 });
       continue;
@@ -489,10 +485,6 @@ $('#pictureDialog').addEventListener('close', () => {
 });
 
 async function makePicturePlate() {
-  if (viewer.models.length >= LIMITS.maxObjects) {
-    toast(`That is ${LIMITS.maxObjects} objects already, the most for one plate.`, { kind: 'error' });
-    return;
-  }
   const o = { ...pic.o };
   busy('Making the plate…');
   await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
@@ -529,20 +521,67 @@ function setTool(name) {
 for (const b of document.querySelectorAll('.tool[data-tool]')) {
   b.addEventListener('click', () => setTool(b.dataset.tool));
 }
-// Copies count against the plate limits like opened files do.
-function duplicateSelected() {
+// Copies count against the plate's detail limit like opened files do. There is no cap on how many
+// objects a plate holds.
+const MAX_COPIES_AT_ONCE = 500;
+
+/** How many more copies of the selection fit under the slicer's detail limit. */
+function copiesThatFit() {
   const list = viewer.selectedList;
-  const tris = viewer.models.reduce((n, m) => n + m.triangles, 0) + list.reduce((n, m) => n + m.triangles, 0);
-  if (viewer.models.length + list.length > LIMITS.maxObjects) {
-    toast(`That would be more than ${LIMITS.maxObjects} objects, the most for one plate.`, { kind: 'error' });
-  } else if (tris > LIMITS.maxTriangles) {
-    toast('That would be too much detail on one plate to slice. Copy fewer models.', { kind: 'error' });
-  } else {
-    viewer.duplicateSelected();
+  const each = list.reduce((n, m) => n + m.triangles, 0);
+  if (!each) return 0;
+  const plate = viewer.models.reduce((n, m) => n + m.triangles, 0);
+  return Math.max(0, Math.floor((LIMITS.maxTriangles - plate) / each));
+}
+
+function duplicateSelected(count = 1) {
+  const list = viewer.selectedList;
+  if (!list.length) return;
+  count = Math.floor(Number(count));
+  if (!(count >= 1)) return;
+  const fit = copiesThatFit();
+  if (count > fit) {
+    toast(fit
+      ? `Only ${fit} more ${fit === 1 ? 'copy fits' : 'copies fit'} before the plate has too much detail to slice.`
+      : 'That would be too much detail on one plate to slice. Copy fewer models.', { kind: 'error', timeout: 8000 });
+    return;
+  }
+  const { copies, noRoom } = viewer.duplicateSelected(count);
+  if (noRoom) {
+    toast(`${noRoom} of the ${copies.length} ${copies.length === 1 ? 'copy' : 'copies'} did not find room on the bed and ${noRoom === 1 ? 'sits' : 'sit'} in the middle. Try Arrange all, scale them down, or print in two batches.`, { kind: 'warn', timeout: 10000 });
+  } else if (count > 1) {
+    toast(`Made ${copies.length} copies.`, { timeout: 2500 });
   }
 }
 
-$('#dupBtn').addEventListener('click', duplicateSelected);
+/** Copy… asks how many copies of the selected model(s) to make. */
+async function askCopies() {
+  const list = viewer.selectedList;
+  if (!list.length) return;
+  const dialog = $('#copiesDialog');
+  const input = $('#copiesInput');
+  const fit = copiesThatFit();
+  const max = Math.min(MAX_COPIES_AT_ONCE, fit);
+  if (!max) {
+    duplicateSelected(1); // shows why it cannot
+    return;
+  }
+  input.max = String(max);
+  if (!(Number(input.value) >= 1) || Number(input.value) > max) input.value = '1';
+  $('#copiesWhat').textContent = list.length === 1 ? `"${list[0].name}"` : `each of the ${list.length} selected models`;
+  $('#copiesHint').textContent = `Up to ${max}. Each copy goes to a free spot on the bed.`;
+  setTimeout(() => input.select(), 0);
+  if (!(await confirmDialog(dialog))) return;
+  duplicateSelected(Math.min(max, Math.max(1, Math.floor(Number(input.value) || 1))));
+}
+
+$('#dupBtn').addEventListener('click', askCopies);
+// Enter in the number box means Copy (the form's first button is Cancel).
+$('#copiesInput').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  $('#copiesDialog').close('ok');
+});
 
 // ---- Undo / redo ------------------------------------------------------------------------------
 
@@ -814,6 +853,49 @@ function renderObjects() {
     li.append(b);
     list.append(li);
   }
+  fitObjects();
+}
+
+// The objects card sits bottom-left, under the tool column. On a short screen (a 1366 x 768
+// Chromebook) a long list grew up over Copy and Delete. First the list gets shorter (it scrolls);
+// if even a short list would cover the tools, the card moves beside them instead, below the tool panel.
+const MIN_LIST_PX = 84; // about three rows
+function fitObjects() {
+  const box = $('.bottom-left');
+  const card = $('#objects');
+  const list = $('#objectList');
+  const tools = $('.tools');
+  box.style.left = '';
+  list.style.maxHeight = '';
+  if (card.hidden || card.classList.contains('closed') || getComputedStyle(tools).flexDirection !== 'column') return;
+  const gap = 8;
+  const t = tools.getBoundingClientRect();
+  const over = t.bottom + gap - card.getBoundingClientRect().top;
+  if (over <= 0) return;
+  const listH = list.getBoundingClientRect().height;
+  if (listH - over >= MIN_LIST_PX) {
+    list.style.maxHeight = `${Math.floor(listH - over)}px`;
+    return;
+  }
+  box.style.left = `${Math.ceil(t.right - box.offsetParent.getBoundingClientRect().left + gap)}px`;
+  const panel = $('#toolPanel');
+  if (panel.hidden) return;
+  const under = panel.getBoundingClientRect().bottom + gap - card.getBoundingClientRect().top;
+  if (under > 0) list.style.maxHeight = `${Math.max(MIN_LIST_PX / 1.5, Math.floor(listH - under))}px`;
+}
+{
+  let queued = false;
+  const refit = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; fitObjects(); });
+  };
+  window.addEventListener('resize', refit);
+  if ('ResizeObserver' in window) {
+    const ro = new ResizeObserver(refit);
+    ro.observe($('.tools'));
+    ro.observe($('#toolPanel'));
+  }
 }
 
 // ---- Split a model into its separate parts ------------------------------------------------------
@@ -835,11 +917,6 @@ async function splitSelected({ loose = false } = {}) {
     toast(list.length === 1
       ? (loose ? `"${list[0].name}" is all one piece. To cut it apart, use Split → By a plane.` : `"${list[0].name}" is all one piece, so there is nothing to split. (Parts that touch or overlap stay together: try Split → Every loose piece, or By a plane.)`)
       : 'Each of these is all one piece, so there is nothing to split.', { timeout: 8000 });
-    return;
-  }
-  const total = viewer.models.length + plan.reduce((n, p) => n + p.parts.length - 1, 0);
-  if (total > LIMITS.maxObjects) {
-    toast(`Splitting makes ${total} objects, and the most for one plate is ${LIMITS.maxObjects}. Remove some first, or print this one as it is.`, { kind: 'error', timeout: 10000 });
     return;
   }
   const tris = viewer.models.reduce((n, m) => n + m.triangles, 0)
@@ -968,11 +1045,6 @@ async function applyCut() {
   }
   endCut();
   const entry = viewer.undoStack.at(-1);
-  if (viewer.models.length > LIMITS.maxObjects) {
-    undo();
-    toast(`That makes ${viewer.models.length + made.length - 1} objects, and the most for one plate is ${LIMITS.maxObjects}. Use fewer planes.`, { kind: 'error', timeout: 10000 });
-    return;
-  }
   for (const m of made) checkHealth(m, { quiet: true });
   const joined = missed ? ` ${missed === 1 ? 'One place' : `${missed} places`} the plane only partly covered stayed joined.` : '';
   const gaps = mended ? ` ${mended === 1 ? 'A gap' : `${mended} gaps`} in the model ${mended === 1 ? 'was' : 'were'} closed too.` : '';
@@ -1546,7 +1618,8 @@ function openMenu({ model, point, normal, x, y }) {
       ...(count === 1 && !cut ? [['▤', 'Split by plane…', () => startCut('z', point?.z ?? null, point ?? null)]] : []),
       ...(count === 1 && !servo && point && normal ? [['⚙', 'Servo here (9 g)…', () => startServo(point, normal)]] : []),
       null,
-      ['⧉', 'Copy', duplicateSelected, 'Ctrl+D'],
+      ['⧉', 'Copy (how many?)…', askCopies],
+      ['⧉', 'Copy once', () => duplicateSelected(1), 'Ctrl+D'],
       ['⬇', count > 1 ? 'Lay each one flat' : 'Biggest flat side down', () => viewer.forSelected('lay flat', (m) => viewer.layFlatAuto(m))],
       ['⊕', 'Center on the bed', () => viewer.centerSelected()],
       ['⌖', 'Zoom to it', () => viewer.frameSelection(), 'F'],
