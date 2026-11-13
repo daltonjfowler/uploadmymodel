@@ -18,7 +18,7 @@ What works today (2026-09-29) and how to run it. Student steps are in
 
 1. **Sign in.** Pick your name under **Who are you?** and type your own password. The same account
    works on all four uploadmy sites. A new teacher, or one who forgot their password, gets a one-time
-   start code from another teacher (**Teacher accounts** on the teacher page) and chooses a new
+   start code from Dalton (**Teacher accounts** on the teacher page) and chooses a new
    password with it.
 2. **Class settings.** For each setting:
    - **Students can change**: on, or off to lock it. A locked setting shows greyed out with a 🔒,
@@ -53,9 +53,10 @@ Wrong guesses of the teacher key or the class phrase lock out only the device th
 ## Teacher accounts on all four sites
 
 Each teacher has their own account and password, shared by all four sites (uploadmycode,
-uploadmylaser, uploadmymodel, uploadmycut). All teachers are equals: anyone signed in can add a
-teacher, make a start code, or remove another teacher. Ten wrong passwords in a row pause that name
-for a short time; a new start code ends the pause.
+uploadmylaser, uploadmymodel, uploadmycut). Only Dalton can add a teacher, make a start code
+(a password reset), or remove a teacher (since 2026-11-13). Every teacher can change their own
+password with **Change my password**. Ten wrong passwords in a row pause that name for a short time;
+a new start code ends the pause.
 
 The old shared passwords (`TEACHER_KEY` and `TEACHER_KEY_2`) were turned off on 2026-11-12. If every
 account is ever locked out, put a `TEACHER_KEY` secret back for a moment

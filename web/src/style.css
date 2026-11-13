@@ -504,6 +504,7 @@ ul.plain { margin: 0; padding-left: 20px; color: var(--muted); }
 /* ---- Small screens: stack the cards instead of floating them ---- */
 @media (max-width: 900px) {
   .chip-text small, .toplink { display: none; }
+  .page .toplink { display: inline; } /* the teacher page keeps its way back to the student page */
   .settings { width: min(352px, calc(100% - 24px)); }
   .action { width: min(352px, calc(100% - 24px)); }
   .objects { display: none; }
