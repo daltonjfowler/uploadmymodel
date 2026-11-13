@@ -47,12 +47,13 @@ a time window, locks settings and sets class defaults, sets the longest print al
 materials, turns the USB copy on or off, and shows a note to students. The rest of the site works
 without it. While slicing is closed, nothing reaches the slicer.
 
-## Teacher key
+## Teacher sign-in
 
-The teacher page needs the `TEACHER_KEY` Worker secret. Set or change it with
-`npx wrangler secret put TEACHER_KEY` (use a long random key). Wrong guesses lock out only the
-device that made them, never the whole school. For local dev, put a throwaway key in `.dev.vars`
-(gitignored). The third settings tab uses its own secret, `ARM_KEY`, set the same way. Neither is
+Teachers sign in with their own accounts (shared by all four uploadmy sites, `TEACHERS_KV`);
+sessions are signed with the `TEACHER_SESSION_KEY` Worker secret. The old shared `TEACHER_KEY`
+secret was deleted on 2026-11-12; it still works as an emergency way in if it is ever put back.
+Wrong guesses lock out only the device that made them, never the whole school. For local dev, put
+throwaway keys in `.dev.vars` (gitignored). The third settings tab uses its own secret, `ARM_KEY`, set the same way. Neither is
 ever in this repo.
 
 ## Commands

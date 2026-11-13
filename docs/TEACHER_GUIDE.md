@@ -16,10 +16,10 @@ What works today (2026-09-29) and how to run it. Student steps are in
 
 **uploadmymodel.com/teacher/** (also the **Teacher** link at the top of the student page).
 
-1. **Teacher key.** One shared password for uploadmycode, uploadmylaser and uploadmymodel, saved in
-   `TEACHER-PASSWORD.txt` on the development PC's desktop. Tick **Remember on this computer** on
-   your own machine only. To change it, run `npx wrangler secret put TEACHER_KEY` in each of the
-   three project folders.
+1. **Sign in.** Pick your name under **Who are you?** and type your own password. The same account
+   works on all four uploadmy sites. A new teacher, or one who forgot their password, gets a one-time
+   start code from another teacher (**Teacher accounts** on the teacher page) and chooses a new
+   password with it.
 2. **Class settings.** For each setting:
    - **Students can change**: on, or off to lock it. A locked setting shows greyed out with a 🔒,
      and the server refuses a file that changes it.
@@ -50,16 +50,17 @@ nothing to pay for.
 Wrong guesses of the teacher key or the class phrase lock out only the device that made them
 (5 wrong in a row lock it for 5 s, then longer), never the whole class.
 
-## One password for all four sites, plus a second teacher
+## Teacher accounts on all four sites
 
-Each site checks its own `TEACHER_KEY` secret. All four sites (uploadmycode, uploadmylaser,
-uploadmymodel, uploadmycut) use the same key: run `npx wrangler secret put TEACHER_KEY` in each
-project folder and paste the same key.
+Each teacher has their own account and password, shared by all four sites (uploadmycode,
+uploadmylaser, uploadmymodel, uploadmycut). All teachers are equals: anyone signed in can add a
+teacher, make a start code, or remove another teacher. Ten wrong passwords in a row pause that name
+for a short time; a new start code ends the pause.
 
-A second teacher (for example a student teacher) gets their own password in the `TEACHER_KEY_2`
-secret, set the same way on each site. It opens the teacher page just like the first key. To take
-it away, run `npx wrangler secret delete TEACHER_KEY_2` in each project folder; the first key keeps
-working.
+The old shared passwords (`TEACHER_KEY` and `TEACHER_KEY_2`) were turned off on 2026-11-12. If every
+account is ever locked out, put a `TEACHER_KEY` secret back for a moment
+(`npx wrangler secret put TEACHER_KEY` in one project folder), sign in with it as **Shared key**,
+make a start code, then delete it again (`npx wrangler secret delete TEACHER_KEY`).
 
 ## What students can never change
 

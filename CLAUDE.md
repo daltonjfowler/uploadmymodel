@@ -42,8 +42,9 @@ Container skeleton (`Desktop\uploadmylaser\uploadmylaser`).
 - Teacher accounts (Dalton 2026-10-30): `src/teachers.ts` (server) and `web/src/teacher-account.ts` + `.css`
   (teacher page) are the SAME files on all four uploadmy sites: change one, copy to all four. Each teacher picks
   their own password (start code first); accounts live in the shared `TEACHERS_KV` namespace, sessions are signed
-  with this site's `TEACHER_SESSION_KEY` secret and sent as `x-teacher-key`. The old shared `TEACHER_KEY`(_2) still
-  works until those secrets are deleted. Teacher changes are logged with the name (`logChange`, "Recent changes").
+  with this site's `TEACHER_SESSION_KEY` secret and sent as `x-teacher-key`. The old shared `TEACHER_KEY`(_2) secrets
+  were deleted on 2026-11-12 (Dalton); sign-in is accounts only. To get in with no working account, put a
+  `TEACHER_KEY` secret back for a moment, sign in with it as "Shared key", fix the account, then delete it again. Teacher changes are logged with the name (`logChange`, "Recent changes").
 - `scripts/make-icons.mjs`: draws the icon. Edit the icon there, never `web/public/icon.svg` by hand.
 - `docs/HARDWARE.md`: printer and slicer facts, each with its source.
 - `docs/ENGINE_OPTIONS.md` + `engine/`: the CuraEngine spike. `engine/resolve.py` does Cura's
