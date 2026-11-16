@@ -4,6 +4,7 @@
 // without Cloudflare-only modules.
 import { DurableObject } from 'cloudflare:workers';
 import { Container, getContainer } from '@cloudflare/containers';
+import { idleCapAction } from './idle-cap.js';
 import { SliceLine, sliceThroughLine } from './line.js';
 import worker from './worker.js';
 
@@ -23,6 +24,35 @@ export class SlicerContainer extends Container {
   // container pre-warms itself). Closing slicing stops it at once (slicerStopIdle below). This only
   // works because container/server.py exits on SIGTERM.
   sleepAfter = '1m';
+  // The idle cap (src/idle-cap.js): starts at "now", so a Durable Object restart never stops a slicer in use.
+  #lastRequestAt = Date.now();
+  #stopSentAt = null;
+
+  async fetch(request) {
+    this.#lastRequestAt = Date.now();
+    this.#stopSentAt = null;
+    return super.fetch(request);
+  }
+
+  // The library's alarm loop runs at least every 3 minutes while the container is up.
+  async alarm(alarmProps) {
+    const now = Date.now();
+    const action = idleCapAction(now, this.#lastRequestAt, this.ctx.container?.running ?? false, this.#stopSentAt);
+    if (action !== 'none') {
+      console.log(JSON.stringify({ message: `idle cap: ${action} slicer`, idleMs: now - this.#lastRequestAt }));
+      try {
+        if (action === 'stop') {
+          this.#stopSentAt = now;
+          await this.stop();
+        } else {
+          await this.destroy();
+        }
+      } catch (e) {
+        console.error(JSON.stringify({ message: `idle cap: ${action} failed`, error: String(e) }));
+      }
+    }
+    return super.alarm(alarmProps);
+  }
 }
 
 // The line, in its own Durable Object with no container attached. Every waiting student asks it
